@@ -1,0 +1,262 @@
+{
+  "git_sha": "731456aa0a4e1dbaad4c7ad4051cc651528fb1ce",
+  "candidate": "qwen3-0.6b",
+  "model": "Qwen/Qwen3-0.6B",
+  "winner": "qwen3-0.6b",
+  "candidates": {
+    "qwen3-0.6b": 1.1752583721579584
+  },
+  "quality": {
+    "headtrained": {
+      "mean_mae": 1.4098606491015822,
+      "beats_floor_count": 0,
+      "n_aspects": 17,
+      "shuffle_mean_abs_shift": 1.4383145711001228
+    },
+    "finetuned": {
+      "mean_mae": 1.2021422659970966,
+      "beats_floor_count": 0,
+      "n_aspects": 17,
+      "shuffle_mean_abs_shift": 1.237679528839448
+    },
+    "calibrated": {
+      "mean_mae": 1.2021422659970966,
+      "beats_floor_count": 0,
+      "n_aspects": 17,
+      "shuffle_mean_abs_shift": 1.237679528839448
+    },
+    "quantized": {
+      "mean_mae": 1.1752583721579584,
+      "beats_floor_count": 0,
+      "n_aspects": 17,
+      "shuffle_mean_abs_shift": 1.1066189653733198
+    }
+  },
+  "calibration": {
+    "calibrated": {
+      "skills_match": {
+        "coverage": 0.75,
+        "mean_width": 3.421375662088394
+      },
+      "experience_level_match": {
+        "coverage": 1.0,
+        "mean_width": 5.281636911630631
+      },
+      "domain_industry_relevance": {
+        "coverage": 0.5,
+        "mean_width": 2.4051581516861917
+      },
+      "education_qualifications_match": {
+        "coverage": 0.25,
+        "mean_width": 2.6608354076743126
+      },
+      "seniority_role_level_fit": {
+        "coverage": 0.5,
+        "mean_width": 2.283236591517925
+      },
+      "career_trajectory_fit": {
+        "coverage": 1.0,
+        "mean_width": 6.373346671462059
+      },
+      "responsibilities_overlap": {
+        "coverage": 0.75,
+        "mean_width": 3.1120036303997036
+      },
+      "location_work_arrangement_fit": {
+        "coverage": 1.0,
+        "mean_width": 5.627017588416734
+      },
+      "soft_skills_match": {
+        "coverage": 0.25,
+        "mean_width": 3.478277991712094
+      },
+      "recency_of_relevant_experience": {
+        "coverage": 0.75,
+        "mean_width": 3.454020272195339
+      },
+      "cv_clarity_structure_quality": {
+        "coverage": 0.5,
+        "mean_width": 4.372532659769059
+      },
+      "job_post_clarity_structure_quality": {
+        "coverage": 1.0,
+        "mean_width": 4.489773470163346
+      },
+      "overall_fit_score": {
+        "coverage": 0.75,
+        "mean_width": 4.0301538366079335
+      },
+      "cv_likely_llm_generated": {
+        "coverage": 1.0,
+        "mean_width": 3.568064108490944
+      },
+      "job_post_likely_llm_generated": {
+        "coverage": 0.3333333333333333,
+        "mean_width": 1.735607922077179
+      },
+      "interview_readiness_score": {
+        "coverage": 0.5,
+        "mean_width": 4.143007582426071
+      },
+      "culture_company_alignment_score": {
+        "coverage": 0.0,
+        "mean_width": 2.0438362836837767
+      }
+    },
+    "quantized": {
+      "skills_match": {
+        "coverage": 0.75,
+        "mean_width": 3.4176023937761784
+      },
+      "experience_level_match": {
+        "coverage": 1.0,
+        "mean_width": 4.830182681977749
+      },
+      "domain_industry_relevance": {
+        "coverage": 0.25,
+        "mean_width": 2.0171698329970242
+      },
+      "education_qualifications_match": {
+        "coverage": 1.0,
+        "mean_width": 4.010974407196045
+      },
+      "seniority_role_level_fit": {
+        "coverage": 0.75,
+        "mean_width": 4.121966954693198
+      },
+      "career_trajectory_fit": {
+        "coverage": 0.75,
+        "mean_width": 5.974672973155975
+      },
+      "responsibilities_overlap": {
+        "coverage": 1.0,
+        "mean_width": 2.9898557874636023
+      },
+      "location_work_arrangement_fit": {
+        "coverage": 1.0,
+        "mean_width": 3.96829662322998
+      },
+      "soft_skills_match": {
+        "coverage": 0.75,
+        "mean_width": 1.835505232401192
+      },
+      "recency_of_relevant_experience": {
+        "coverage": 1.0,
+        "mean_width": 5.794342982769013
+      },
+      "cv_clarity_structure_quality": {
+        "coverage": 1.0,
+        "mean_width": 5.845209950208664
+      },
+      "job_post_clarity_structure_quality": {
+        "coverage": 0.75,
+        "mean_width": 3.527156789973378
+      },
+      "overall_fit_score": {
+        "coverage": 1.0,
+        "mean_width": 2.8650732594728474
+      },
+      "cv_likely_llm_generated": {
+        "coverage": 1.0,
+        "mean_width": 2.130650272592902
+      },
+      "job_post_likely_llm_generated": {
+        "coverage": 0.3333333333333333,
+        "mean_width": 3.9803252960555255
+      },
+      "interview_readiness_score": {
+        "coverage": 1.0,
+        "mean_width": 3.2865173056721684
+      },
+      "culture_company_alignment_score": {
+        "coverage": 0.5,
+        "mean_width": 4.413854750990868
+      }
+    }
+  },
+  "calibration_thresholds": {
+    "skills_match": {
+      "delta": 1.8300835418701171,
+      "insufficient_data_threshold": 7.685058341026306
+    },
+    "experience_level_match": {
+      "delta": 0.6101286274194717,
+      "insufficient_data_threshold": 7.813304039239883
+    },
+    "domain_industry_relevance": {
+      "delta": 1.1057940244674682,
+      "insufficient_data_threshold": 6.003955745697022
+    },
+    "education_qualifications_match": {
+      "delta": 1.3364964723587036,
+      "insufficient_data_threshold": 6.461233973503113
+    },
+    "seniority_role_level_fit": {
+      "delta": 1.056277103424072,
+      "insufficient_data_threshold": 6.536514296531677
+    },
+    "career_trajectory_fit": {
+      "delta": 2.3328781604766844,
+      "insufficient_data_threshold": 10.878194665908813
+    },
+    "responsibilities_overlap": {
+      "delta": 1.2314687967300415,
+      "insufficient_data_threshold": 6.270648896694183
+    },
+    "location_work_arrangement_fit": {
+      "delta": 0.6116874575614929,
+      "insufficient_data_threshold": 9.016885113716125
+    },
+    "soft_skills_match": {
+      "delta": 0.6021718016359955,
+      "insufficient_data_threshold": 5.539362357277423
+    },
+    "recency_of_relevant_experience": {
+      "delta": -0.8478093624114991,
+      "insufficient_data_threshold": 5.194964671134949
+    },
+    "cv_clarity_structure_quality": {
+      "delta": -0.8536812543869019,
+      "insufficient_data_threshold": 7.227429294586182
+    },
+    "job_post_clarity_structure_quality": {
+      "delta": -0.2801958465576172,
+      "insufficient_data_threshold": 5.801358194351196
+    },
+    "overall_fit_score": {
+      "delta": -0.006599807739257807,
+      "insufficient_data_threshold": 5.8791038513183596
+    },
+    "cv_likely_llm_generated": {
+      "delta": -0.16714638471603394,
+      "insufficient_data_threshold": 3.850768953561783
+    },
+    "job_post_likely_llm_generated": {
+      "delta": -0.1452823281288147,
+      "insufficient_data_threshold": 7.621721386909485
+    },
+    "interview_readiness_score": {
+      "delta": 0.5562391877174377,
+      "insufficient_data_threshold": 5.963197469711304
+    },
+    "culture_company_alignment_score": {
+      "delta": 0.7565078020095826,
+      "insufficient_data_threshold": 105.3566282749176
+    }
+  },
+  "deployability": {
+    "onnx_fp32_bytes": 2385831474,
+    "onnx_quantized_bytes": 598542534,
+    "cold_load_time_s": null,
+    "webgpu_latency_s": null,
+    "wasm_latency_s": null,
+    "loads_in_browser": null
+  },
+  "drift_jevbench": {
+    "headtrained": null,
+    "finetuned": null
+  },
+  "limitations": [
+    "The test split covers few distinct CV profiles, so candidate-axis generalisation is the weakest claim here; read test metrics with the bootstrap CIs in the per-stage eval JSONs, not as point estimates."
+  ]
+}

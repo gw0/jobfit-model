@@ -8,6 +8,7 @@ coverage and mean interval width. The model and calibration are chosen by --stag
     headtrained  checkpoints/headtrain
     finetuned    checkpoints/finetune
     calibrated   checkpoints/finetune + calibration/params.json
+    quantized    export/quantized (ONNX) + calibration/params.json (pre-quantization fit)
 
 Usage:
     ./pipeline/evaluate.py --dataset-dir datasets_smoke --runs-dir runs_smoke --stage finetuned
@@ -30,14 +31,19 @@ def model_dir(runs_dir, slug, stage):
         "headtrained": base / "checkpoints" / "headtrain",
         "finetuned": base / "checkpoints" / "finetune",
         "calibrated": base / "checkpoints" / "finetune",
+        "quantized": base / "export" / "quantized",
     }[stage]
 
 
 def calibration_path(runs_dir, slug, stage):
-    return runs_dir / slug / "calibration" / "params.json" if stage == "calibrated" else None
+    return runs_dir / slug / "calibration" / "params.json" if stage in ("calibrated", "quantized") else None
 
 
-def _load_model(path):
+def _load_model(stage, path):
+    if stage == "quantized":
+        from optimum.onnxruntime import ORTModelForSequenceClassification
+
+        return ORTModelForSequenceClassification.from_pretrained(path)
     tokenizer = common.load_tokenizer(path)
     return common.load_classification_model(path, tokenizer.pad_token_id).eval()
 
@@ -99,7 +105,7 @@ def _run(args):
         return
 
     path = model_dir(args.runs_dir, slug, args.stage)
-    model = _load_model(path)
+    model = _load_model(args.stage, path)
     preds_q = common.predict_quantiles_batched(model, cache["input_ids"], cache["attention_mask"], args.batch_size)
 
     labels = common.load_labels(args.dataset_dir)

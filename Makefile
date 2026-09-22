@@ -6,7 +6,8 @@
 #              dataset build and the Dockerized pipeline.
 
 .PHONY: venv build test smoke-fetch-jobs smoke-cvs smoke-dataset smoke-labels \
-	smoke-prepare smoke-headtrain smoke-finetune smoke-calibrate
+	smoke-prepare smoke-headtrain smoke-finetune smoke-calibrate smoke-export smoke-publish \
+	publish-hf
 
 VENV ?= .venv/bin
 PY ?= $(VENV)/python
@@ -64,3 +65,15 @@ smoke-finetune: smoke-headtrain
 smoke-calibrate: smoke-finetune
 	$(DOCKER_RUN) ./pipeline/calibrate.py $(STAGE_ARGS)
 	$(DOCKER_RUN) ./pipeline/evaluate.py --stage calibrated $(STAGE_ARGS)
+
+smoke-export: smoke-calibrate
+	$(DOCKER_RUN) ./pipeline/export.py $(STAGE_ARGS)
+	$(DOCKER_RUN) ./pipeline/evaluate.py --stage quantized $(STAGE_ARGS)
+
+smoke-publish: smoke-export
+	$(DOCKER_RUN) ./pipeline/publish.py $(STAGE_ARGS)
+
+# --- publishing (needs HF_TOKEN) -------------------------------------------------------
+
+publish-hf:
+	./pipeline/publish.py --runs-dir runs_smoke --model $(MODEL) --push-hf

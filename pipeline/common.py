@@ -37,7 +37,7 @@ CV_JOB_FIELD = {
 }
 
 DEFAULT_MODEL = "Qwen/Qwen3-0.6B"
-STAGES = ("headtrained", "finetuned", "calibrated")
+STAGES = ("headtrained", "finetuned", "calibrated", "quantized")
 MLFLOW_EXPERIMENT = "jobfit-pipeline"
 
 
@@ -183,6 +183,11 @@ def load_classification_model(model_name_or_path, pad_token_id):
     model.config.pad_token_id = pad_token_id
     model.config.use_cache = False
     return model
+
+
+def onnx_bytes(directory):
+    """Size of the ONNX graphs in `directory`, including external-data weight files."""
+    return sum(f.stat().st_size for pattern in ("*.onnx", "*.onnx_data") for f in Path(directory).glob(pattern))
 
 
 def reshape_quantile_logits(logits):
