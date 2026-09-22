@@ -1,0 +1,5 @@
+# data/fetch_jobs/ only -- the light subset CI installs.
+requests
+beautifulsoup4
+markdownify
+feedparser
