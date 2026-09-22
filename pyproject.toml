@@ -1,5 +1,5 @@
 [tool.pytest.ini_options]
 pythonpath = ["data", "data/fetch_jobs"]
-testpaths = ["data/tests", "data/fetch_jobs/tests"]
+testpaths = ["tests", "data/tests", "data/fetch_jobs/tests"]
 # data/tests and data/fetch_jobs/tests are both packages named `tests`.
 addopts = "--import-mode=importlib"

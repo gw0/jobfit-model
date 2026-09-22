@@ -4,3 +4,9 @@
 presidio-analyzer
 presidio-anonymizer
 spacy
+
+# ai_text_detector.py runs short CPU inference; the CPU-only torch wheel avoids
+# pulling the multi-GB CUDA runtime.
+--extra-index-url https://download.pytorch.org/whl/cpu
+transformers
+torch

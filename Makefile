@@ -1,9 +1,9 @@
 # make test    hermetic: every pytest suite. No network beyond package installs,
 #              no credentials -- this is what CI runs.
 # smoke-*      the live chain against datasets_smoke/: job fetching, `claude -p` CV
-#              generation (needs an authenticated `claude` CLI) and the dataset build.
+#              generation and labeling (needs an authenticated `claude` CLI) and the dataset build.
 
-.PHONY: venv test smoke-fetch-jobs smoke-cvs smoke-dataset
+.PHONY: venv test smoke-fetch-jobs smoke-cvs smoke-dataset smoke-labels
 
 VENV ?= .venv/bin
 PY ?= $(VENV)/python
@@ -32,3 +32,6 @@ smoke-cvs:
 
 smoke-dataset:
 	./data/build_dataset.py --out-dir datasets_smoke
+
+smoke-labels:
+	./data/label_dataset.py --out-dir datasets_smoke --double-label --double-label-sample 3
