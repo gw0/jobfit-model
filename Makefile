@@ -1,13 +1,14 @@
 # make test    hermetic: every pytest suite plus the frontend type-check/build/vitest.
 #              No network beyond package installs, no credentials -- this is what CI runs.
-# make build   the pipeline Docker image.
-# smoke-*      the live chain against datasets_smoke/: job fetching, `claude -p` CV
+# make smoke   the live chain against datasets_smoke/: job fetching, `claude -p` CV
 #              generation and labeling (needs an authenticated `claude` CLI), the
-#              dataset build, the Dockerized pipeline and the KinD/Argo run.
+#              Dockerized pipeline, the frontend parity check and the KinD/Argo run.
+# smoke-*      individual live steps; each pipeline step depends on the previous one.
 
-.PHONY: venv build test smoke-fetch-jobs smoke-cvs smoke-dataset smoke-labels \
+.PHONY: venv build test smoke \
+	smoke-fetch-jobs smoke-cvs smoke-dataset smoke-labels \
 	smoke-prepare smoke-headtrain smoke-finetune smoke-calibrate smoke-export smoke-publish \
-	copy-model \
+	copy-model smoke-frontend \
 	cluster-up cluster-down cluster-check cluster-logs cluster-mlflow smoke-cluster \
 	publish-hf deploy-hf
 
@@ -40,18 +41,20 @@ venv:
 
 build:
 	docker build -t jobfit-pipeline -f docker/pipeline.Dockerfile --build-arg GIT_SHA=$$(git rev-parse HEAD) .
+	docker build -t jobfit-frontend -f docker/frontend.Dockerfile .
 
 test:
 	$(PY) -m pytest -q
 	@! grep -n "Mozilla" data/fetch_jobs/*.py || { echo "spoofed browser User-Agent in data/fetch_jobs" >&2; exit 1; }
 	cd frontend && $(NPM) install && $(NPM) run build && $(NPM) run test
 
+smoke: test smoke-fetch-jobs smoke-cvs smoke-dataset smoke-labels smoke-publish smoke-frontend smoke-cluster
+
 # --- dataset toolset -----------------------------------------------------------------
+# --count 10: the 70/10/10/10 split ratios need 10 CVs before val/calib/test are non-empty.
 
 smoke-fetch-jobs:
 	./data/fetch_jobs/fetch_greenhouse.py grafanalabs --out-dir $$(mktemp -d) --include engineer
-
-# --count 10: the 70/10/10/10 split ratios need 10 CVs before val/calib/test are non-empty.
 
 smoke-cvs:
 	./data/generate_cvs.py --count 10 --out-dir datasets_smoke
@@ -98,6 +101,13 @@ copy-model:
 	rm -rf frontend/public/models/$(SLUG)
 	mkdir -p frontend/public/models
 	cp -r runs_smoke/$(SLUG)/export/web frontend/public/models/$(SLUG)
+
+smoke-frontend: smoke-export copy-model build
+	cd frontend && $(NPM) install
+	node frontend/scripts/verify-parity.mjs frontend/public/models/$(SLUG)
+	docker run --rm -d -p 8080:8080 --name jobfit-frontend-smoke jobfit-frontend
+	curl -sf --retry 5 --retry-connrefused http://localhost:8080/ > /dev/null && echo "frontend served OK"; \
+		status=$$?; docker stop jobfit-frontend-smoke; exit $$status
 
 # --- cluster (KinD + Argo + MLflow + OTel collector) ------------------------------------
 # The same flow runs a real training job: with ./datasets and ./runs in place, submit

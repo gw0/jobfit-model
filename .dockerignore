@@ -1,7 +1,11 @@
-# Build contexts only need aspects.json, data/ and pipeline/ sources.
+# Build contexts only need aspects.json, data/, pipeline/ and frontend/ sources.
 .*
 **/__pycache__/
 *.pyc
+frontend/node_modules/
+frontend/dist/
+frontend/public/models/
+*.tsbuildinfo
 datasets/
 datasets_smoke/
 runs/
