@@ -1,0 +1,6 @@
+-r requirements-fetch.txt
+
+# pii_scrub.py; after installing: python -m spacy download en_core_web_sm
+presidio-analyzer
+presidio-anonymizer
+spacy
