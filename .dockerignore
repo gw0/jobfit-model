@@ -1,0 +1,14 @@
+# Build contexts only need aspects.json, data/ and pipeline/ sources.
+.*
+**/__pycache__/
+*.pyc
+datasets/
+datasets_smoke/
+runs/
+runs_smoke/
+*.onnx
+*.onnx_data
+*.safetensors
+*.bin
+*.gguf
+models/

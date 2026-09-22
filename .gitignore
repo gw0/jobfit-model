@@ -2,6 +2,7 @@
 _*
 .*
 !.gitignore
+!.dockerignore
 !.github/
 !__init__.py
 
@@ -12,3 +13,11 @@ _*
 __pycache__/
 *.pyc
 *.egg-info/
+
+# Model weights (published to HF Hub)
+*.onnx
+*.onnx_data
+*.safetensors
+*.bin
+*.gguf
+models/

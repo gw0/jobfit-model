@@ -1,9 +1,10 @@
 # make test    hermetic: every pytest suite. No network beyond package installs,
 #              no credentials -- this is what CI runs.
+# make build   the pipeline Docker image.
 # smoke-*      the live chain against datasets_smoke/: job fetching, `claude -p` CV
 #              generation and labeling (needs an authenticated `claude` CLI) and the dataset build.
 
-.PHONY: venv test smoke-fetch-jobs smoke-cvs smoke-dataset smoke-labels
+.PHONY: venv build test smoke-fetch-jobs smoke-cvs smoke-dataset smoke-labels
 
 VENV ?= .venv/bin
 PY ?= $(VENV)/python
@@ -15,6 +16,9 @@ venv:
 	python3 -m venv .venv
 	$(PY) -m pip install -q pytest -r data/requirements.txt
 	$(PY) -m spacy download en_core_web_sm
+
+build:
+	docker build -t jobfit-pipeline -f docker/pipeline.Dockerfile .
 
 test:
 	$(PY) -m pytest -q
