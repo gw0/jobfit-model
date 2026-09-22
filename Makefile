@@ -1,5 +1,5 @@
-# make test    hermetic: every pytest suite. No network beyond package installs,
-#              no credentials -- this is what CI runs.
+# make test    hermetic: every pytest suite plus the frontend type-check/build/vitest.
+#              No network beyond package installs, no credentials -- this is what CI runs.
 # make build   the pipeline Docker image.
 # smoke-*      the live chain against datasets_smoke/: job fetching, `claude -p` CV
 #              generation and labeling (needs an authenticated `claude` CLI), the
@@ -7,12 +7,15 @@
 
 .PHONY: venv build test smoke-fetch-jobs smoke-cvs smoke-dataset smoke-labels \
 	smoke-prepare smoke-headtrain smoke-finetune smoke-calibrate smoke-export smoke-publish \
+	copy-model \
 	cluster-up cluster-down cluster-check cluster-logs cluster-mlflow smoke-cluster \
-	publish-hf
+	publish-hf deploy-hf
 
 VENV ?= .venv/bin
 PY ?= $(VENV)/python
+NPM ?= npm
 MODEL ?= Qwen/Qwen3-0.6B
+SLUG ?= qwen3-0.6b
 
 # Entry-point scripts use `#!/usr/bin/env python3`; resolve that to the venv.
 export PATH := $(CURDIR)/.venv/bin:$(PATH)
@@ -41,6 +44,7 @@ build:
 test:
 	$(PY) -m pytest -q
 	@! grep -n "Mozilla" data/fetch_jobs/*.py || { echo "spoofed browser User-Agent in data/fetch_jobs" >&2; exit 1; }
+	cd frontend && $(NPM) install && $(NPM) run build && $(NPM) run test
 
 # --- dataset toolset -----------------------------------------------------------------
 
@@ -86,6 +90,14 @@ smoke-export: smoke-calibrate
 
 smoke-publish: smoke-export
 	$(DOCKER_RUN) ./pipeline/publish.py $(STAGE_ARGS)
+
+# --- frontend --------------------------------------------------------------------------
+
+# Serves a pipeline export locally at /models/$(SLUG)/ (frontend/public/models is gitignored).
+copy-model:
+	rm -rf frontend/public/models/$(SLUG)
+	mkdir -p frontend/public/models
+	cp -r runs_smoke/$(SLUG)/export/web frontend/public/models/$(SLUG)
 
 # --- cluster (KinD + Argo + MLflow + OTel collector) ------------------------------------
 # The same flow runs a real training job: with ./datasets and ./runs in place, submit
@@ -183,3 +195,6 @@ smoke-cluster: build
 
 publish-hf:
 	./pipeline/publish.py --runs-dir runs_smoke --model $(MODEL) --push-hf
+
+deploy-hf:
+	frontend/scripts/deploy-hf.sh
