@@ -8,6 +8,7 @@ quantile head with an HF Trainer and a confidence-weighted pinball loss.
   later stage sees a plain dense model.
 
 With a `val` split the best epoch by val MAE is kept, otherwise the last one.
+The Trainer logs to the active MLflow run.
 
 Usage:
     ./pipeline/train.py --stage headtrain --dataset-dir datasets_smoke --runs-dir runs_smoke
@@ -67,12 +68,12 @@ def make_compute_metrics(confidence_floor):
 
 
 def _build_model(args, slug):
-    """(model, tokenizer) for the requested stage."""
+    """(model, tokenizer, extra params to log) for the requested stage."""
     if args.stage == "headtrain":
         tokenizer = common.load_tokenizer(args.model)
         model = common.load_classification_model(args.model, tokenizer.pad_token_id)
         common.freeze_backbone(model)
-        return model, tokenizer
+        return model, tokenizer, {}
 
     from peft import LoraConfig, get_peft_model
 
@@ -87,10 +88,14 @@ def _build_model(args, slug):
     model.enable_input_require_grads()
     lora = LoraConfig(r=args.lora_rank, lora_alpha=args.lora_alpha,
                       target_modules=args.lora_target_modules.split(","), modules_to_save=["score"])
-    return get_peft_model(model, lora), tokenizer
+    params = {"lora_rank": args.lora_rank, "lora_alpha": args.lora_alpha,
+              "lora_target_modules": args.lora_target_modules}
+    return get_peft_model(model, lora), tokenizer, params
 
 
 def _run(args):
+    import mlflow
+
     slug = common.model_slug(args.model)
     train_cache = common.load_cache(args.runs_dir, slug, "train")
     if train_cache is None:
@@ -99,7 +104,7 @@ def _run(args):
     labels = common.load_labels(args.dataset_dir)
 
     transformers.set_seed(args.seed)
-    model, tokenizer = _build_model(args, slug)
+    model, tokenizer, extra_params = _build_model(args, slug)
     hash_before = common.backbone_state_dict_hash(model) if args.stage == "headtrain" else None
 
     out_dir = args.runs_dir / slug / "checkpoints" / args.stage
@@ -123,7 +128,7 @@ def _run(args):
         logging_strategy="epoch",
         label_names=LABEL_NAMES,
         remove_unused_columns=False,
-        report_to="none",
+        report_to=["mlflow"],
         run_name=f"{args.stage}-{slug}",
     )
     trainer = QuantileTrainer(
@@ -136,22 +141,31 @@ def _run(args):
         confidence_floor=args.confidence_floor,
     )
 
-    if val_cache is None:
-        print("no val split -- keeping the final epoch's weights")
+    with common.mlflow_run(args.stage, args.model, args.run_group):
+        mlflow.log_params({"stage": args.stage, "confidence_floor": args.confidence_floor,
+                           "train_pairs": len(train_cache["pairs"]),
+                           "val_pairs": 0 if val_cache is None else len(val_cache["pairs"]),
+                           **extra_params})
+        common.log_dataset_input(train_cache, args.runs_dir, slug, "train", context="training")
+        if val_cache is not None:
+            common.log_dataset_input(val_cache, args.runs_dir, slug, "val", context="training")
+        else:
+            print("no val split -- keeping the final epoch's weights")
 
-    trainer.train()
-    model = trainer.model
-    if args.stage == "headtrain":
-        if common.backbone_state_dict_hash(model) != hash_before:
-            raise SystemExit("BACKBONE HASH CHANGED during headtrain -- freezing is broken")
-        print("backbone hash unchanged: freezing verified")
-    else:
-        model = model.merge_and_unload()
+        trainer.train()
+        model = trainer.model
+        if args.stage == "headtrain":
+            if common.backbone_state_dict_hash(model) != hash_before:
+                raise SystemExit("BACKBONE HASH CHANGED during headtrain -- freezing is broken")
+            print("backbone hash unchanged: freezing verified")
+        else:
+            model = model.merge_and_unload()
 
-    model.save_pretrained(out_dir)
-    tokenizer.save_pretrained(out_dir)
-    shutil.rmtree(trainer_dir, ignore_errors=True)
-    print(f"saved {args.stage} checkpoint -> {out_dir}")
+        model.save_pretrained(out_dir)
+        tokenizer.save_pretrained(out_dir)
+        shutil.rmtree(trainer_dir, ignore_errors=True)
+        print(f"saved {args.stage} checkpoint -> {out_dir}")
+        common.log_model_signature(model, train_cache["input_ids"], train_cache["attention_mask"])
 
 
 def main():
@@ -168,7 +182,8 @@ def main():
         if getattr(args, key) is None:
             setattr(args, key, value)
 
-    _run(args)
+    with common.stage_span(args.stage):
+        _run(args)
 
 
 if __name__ == "__main__":

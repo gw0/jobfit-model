@@ -21,6 +21,7 @@ __pycache__/
 *.bin
 *.gguf
 models/
+mlruns/
 
 # Local datasets and runs symlinks
 /runs

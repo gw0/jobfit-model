@@ -6,7 +6,7 @@
 #              dataset build and the Dockerized pipeline.
 
 .PHONY: venv build test smoke-fetch-jobs smoke-cvs smoke-dataset smoke-labels \
-	smoke-prepare smoke-headtrain smoke-finetune
+	smoke-prepare smoke-headtrain smoke-finetune smoke-calibrate
 
 VENV ?= .venv/bin
 PY ?= $(VENV)/python
@@ -21,7 +21,7 @@ venv:
 	$(PY) -m spacy download en_core_web_sm
 
 build:
-	docker build -t jobfit-pipeline -f docker/pipeline.Dockerfile .
+	docker build -t jobfit-pipeline -f docker/pipeline.Dockerfile --build-arg GIT_SHA=$$(git rev-parse HEAD) .
 
 test:
 	$(PY) -m pytest -q
@@ -60,3 +60,7 @@ smoke-headtrain: smoke-prepare
 smoke-finetune: smoke-headtrain
 	$(DOCKER_RUN) ./pipeline/train.py --stage finetune $(STAGE_ARGS)
 	$(DOCKER_RUN) ./pipeline/evaluate.py --stage finetuned $(STAGE_ARGS)
+
+smoke-calibrate: smoke-finetune
+	$(DOCKER_RUN) ./pipeline/calibrate.py $(STAGE_ARGS)
+	$(DOCKER_RUN) ./pipeline/evaluate.py --stage calibrated $(STAGE_ARGS)

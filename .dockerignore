@@ -6,6 +6,7 @@ datasets/
 datasets_smoke/
 runs/
 runs_smoke/
+mlruns/
 *.onnx
 *.onnx_data
 *.safetensors

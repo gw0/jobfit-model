@@ -51,6 +51,34 @@ def test_mean_mae_skips_unlabeled_aspects():
     assert math.isnan(metrics.mean_mae(_quantiles(2, 0, 0.7, 1), _full(2, np.nan), _full(2, 1.0), 0.3))
 
 
+def test_conformal_delta_reaches_target_coverage():
+    target = np.array([0.5, 0.55, 0.45, 0.65, 0.35, 0.5, 0.5, 0.5, 0.5, 0.5])
+    delta = metrics.conformal_delta(np.full(10, 0.4), np.full(10, 0.6), target, coverage=0.9)
+    assert delta >= 0
+    assert np.mean((0.4 - delta <= target) & (target <= 0.6 + delta)) >= 0.9
+    assert math.isnan(metrics.conformal_delta(np.array([]), np.array([]), np.array([])))
+
+
+def test_width_threshold_nearest_rank():
+    assert metrics.width_threshold(np.array([0.1, 0.2, 0.3, 0.4, 0.5])) == 0.5
+    assert metrics.width_threshold(np.arange(1, 21, dtype=float)) == 18.0
+    assert math.isnan(metrics.width_threshold(np.array([])))
+
+
+def test_fit_calibration_and_coverage():
+    params = metrics.fit_calibration(_quantiles(10, 0.4, 0.5, 0.6), _full(10, 0.5), _full(10, 1.0), 0.3)
+    assert set(params) == set(ASPECT_IDS)
+    assert all(not math.isnan(p["delta"]) for p in params.values())
+    empty = metrics.fit_calibration(_quantiles(5, 0.4, 0.5, 0.6), _full(5, 0.5), _full(5, 0.0), 0.3)
+    assert all(math.isnan(p["delta"]) and math.isnan(p["insufficient_data_threshold"]) for p in empty.values())
+
+    coverage = metrics.compute_coverage(_quantiles(5, 0.3, 0.5, 0.7), _full(5, 0.5), _full(5, 1.0),
+                                        {aid: {"delta": 0.0} for aid in ASPECT_IDS}, 0.3)
+    assert all(c["coverage"] == 1.0 and math.isclose(c["mean_width"], 0.4) for c in coverage.values())
+    uncalibrated = metrics.compute_coverage(_quantiles(2, 0.3, 0.5, 0.7), _full(2, 0.5), _full(2, 1.0), {}, 0.3)
+    assert all(math.isnan(c["coverage"]) for c in uncalibrated.values())
+
+
 def test_bootstrap_ci():
     assert all(math.isnan(v) for v in metrics.bootstrap_ci([[0.1, 0.2]]))
     lo, hi = metrics.bootstrap_ci([[0.5 + 0.01 * i] for i in range(10)], n_resamples=200)

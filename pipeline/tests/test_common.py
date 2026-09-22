@@ -1,6 +1,7 @@
 """Unit tests for common.py. torch-dependent tests skip when torch is absent (CI)."""
 
 import math
+import sys
 import types
 
 import numpy as np
@@ -50,6 +51,90 @@ def test_json_roundtrip_writes_null_and_restores_nan(tmp_path):
 
 def test_model_slug():
     assert common.model_slug("Qwen/Qwen3-0.6B") == "qwen3-0.6b"
+
+
+def test_git_sha_prefers_env(monkeypatch):
+    monkeypatch.setenv("GIT_SHA", "abc123")
+    assert common.git_sha() == "abc123"
+    monkeypatch.delenv("GIT_SHA")
+    assert isinstance(common.git_sha(), str) and common.git_sha()
+
+
+def test_stage_span_without_collector_is_a_passthrough(monkeypatch):
+    monkeypatch.delenv("OTEL_EXPORTER_OTLP_ENDPOINT", raising=False)
+    with common.stage_span("unit-test"):
+        pass
+    with pytest.raises(ValueError):  # a failing stage keeps its own exception
+        with common.stage_span("unit-test"):
+            raise ValueError("boom")
+
+
+# --- mlflow_run parent lookup ------------------------------------------------------------
+
+class _FakeMlflow(types.SimpleNamespace):
+    """Records start_run calls; search_runs finds whatever parent `create_run` made."""
+
+    def __init__(self):
+        super().__init__(started=[], created=[])
+        fake = self
+
+        class Client:
+            def create_run(self, experiment_id, tags):
+                fake.created.append(tags)
+                return types.SimpleNamespace(info=types.SimpleNamespace(run_id=f"parent-{len(fake.created)}"))
+
+        self.MlflowClient = Client
+
+    def set_experiment(self, name):
+        pass
+
+    def get_experiment_by_name(self, name):
+        return types.SimpleNamespace(experiment_id="1")
+
+    def search_runs(self, experiment_ids, filter_string, max_results, output_format):
+        group = filter_string.split("'")[1]
+        return [types.SimpleNamespace(info=types.SimpleNamespace(run_id=f"parent-{i + 1}"))
+                for i, tags in enumerate(self.created) if tags["run_group"] == group][:1]
+
+    def start_run(self, **kwargs):
+        self.started.append(kwargs)
+        return _NullContext(types.SimpleNamespace(info=types.SimpleNamespace(run_id="child")))
+
+
+class _NullContext:
+    def __init__(self, value):
+        self.value = value
+
+    def __enter__(self):
+        return self.value
+
+    def __exit__(self, *exc):
+        return False
+
+
+def test_mlflow_run_nests_every_stage_under_one_parent_per_group(monkeypatch):
+    fake = _FakeMlflow()
+    monkeypatch.setitem(sys.modules, "mlflow", fake)
+    for stage in ("prepare", "headtrain"):
+        with common.mlflow_run(stage, "Qwen/Qwen3-0.6B", run_group="wf-1"):
+            pass
+    with common.mlflow_run("prepare", "Qwen/Qwen3-0.6B", run_group="wf-2"):
+        pass
+
+    assert [c["run_group"] for c in fake.created] == ["wf-1", "wf-2"]
+    parents = [s["run_id"] for s in fake.started if "run_id" in s]
+    assert parents == ["parent-1", "parent-1", "parent-2"]
+    assert all(s["nested"] for s in fake.started if "run_id" not in s)
+
+
+def test_mlflow_run_without_group_is_top_level(monkeypatch):
+    fake = _FakeMlflow()
+    monkeypatch.setitem(sys.modules, "mlflow", fake)
+    with common.mlflow_run("calibrate", "Qwen/Qwen3-0.6B", tags={"extra": "x"}):
+        pass
+    assert fake.created == []
+    (call,) = fake.started
+    assert call["run_name"] == "calibrate-qwen3-0.6b" and call["tags"]["extra"] == "x"
 
 
 # --- torch ---------------------------------------------------------------------------------

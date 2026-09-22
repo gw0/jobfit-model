@@ -1,12 +1,16 @@
 """Shared pipeline plumbing: aspect constants, JSON/cache I/O, label -> target joining,
-the pinball loss, model loading and batched inference, and CLI args. torch/transformers
-are imported lazily, so the pure helpers are testable without them.
+the pinball loss, model loading and batched inference, CLI args, MLflow runs and OTel
+spans. torch/transformers/mlflow/opentelemetry are imported lazily, so the pure
+helpers are testable without them.
 """
 
 import hashlib
 import json
 import math
+import os
+import subprocess
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 
 import numpy as np
@@ -33,7 +37,8 @@ CV_JOB_FIELD = {
 }
 
 DEFAULT_MODEL = "Qwen/Qwen3-0.6B"
-STAGES = ("headtrained", "finetuned")
+STAGES = ("headtrained", "finetuned", "calibrated")
+MLFLOW_EXPERIMENT = "jobfit-pipeline"
 
 
 def add_common_args(parser):
@@ -46,6 +51,8 @@ def add_common_args(parser):
                         help="labels below this judge confidence are masked out")
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--run-group", default=None,
+                        help="nest this stage's MLflow run under the parent run of this group")
 
 
 def model_slug(model_name):
@@ -211,3 +218,142 @@ def load_cache(runs_dir, slug, name):
 
     path = cache_path(runs_dir, slug, name)
     return torch.load(path, weights_only=False) if path.is_file() else None
+
+
+# --- provenance / tracking --------------------------------------------------------------
+
+def git_sha():
+    """GIT_SHA from the environment (baked into the pipeline image, which has no .git),
+    else the checkout's HEAD."""
+    if os.environ.get("GIT_SHA"):
+        return os.environ["GIT_SHA"]
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, text=True, stderr=subprocess.DEVNULL
+        ).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return "unknown"
+
+
+def _group_parent_run_id(mlflow, run_group):
+    """The parent run tagged `run_group=<run_group>`, created on first use. Stages run
+    sequentially, so find-or-create never races."""
+    experiment = mlflow.get_experiment_by_name(MLFLOW_EXPERIMENT)
+    runs = mlflow.search_runs(
+        experiment_ids=[experiment.experiment_id],
+        filter_string=f"tags.run_group = '{run_group}'",
+        max_results=1, output_format="list",
+    )
+    if runs:
+        return runs[0].info.run_id
+    run = mlflow.MlflowClient().create_run(
+        experiment.experiment_id, tags={"run_group": run_group, "mlflow.runName": run_group}
+    )
+    return run.info.run_id
+
+
+@contextmanager
+def mlflow_run(stage, model, run_group=None, tags=None):
+    """An MLflow run tagged with stage/model/git SHA. With `run_group` (Argo passes the
+    workflow name) it is nested under that group's parent run. The tracking server is
+    taken from MLFLOW_TRACKING_URI, else a local ./mlruns store."""
+    import mlflow
+
+    mlflow.set_experiment(MLFLOW_EXPERIMENT)
+    tags = {"stage": stage, "model": model, "git_sha": git_sha(), **(tags or {})}
+    run_name = f"{stage}-{model_slug(model)}"
+    if not run_group:
+        with mlflow.start_run(run_name=run_name, tags=tags) as run:
+            yield run
+        return
+    with mlflow.start_run(run_id=_group_parent_run_id(mlflow, run_group)):
+        with mlflow.start_run(run_name=run_name, nested=True, tags=tags) as run:
+            yield run
+
+
+def log_dataset_input(cache, runs_dir, slug, name, context):
+    """mlflow.log_input() lineage for a cached split, pointing at the real .pt file."""
+    import mlflow
+    import mlflow.data
+
+    dataset = mlflow.data.from_numpy(
+        cache["input_ids"].numpy(), source=str(cache_path(runs_dir, slug, name)), name=f"{slug}-{name}"
+    )
+    mlflow.log_input(dataset, context=context)
+
+
+def log_model_signature(model, input_ids, attention_mask):
+    """Logs an inferred model signature from one sample forward pass."""
+    import mlflow
+    import torch
+
+    sample = {"input_ids": input_ids[:1], "attention_mask": attention_mask[:1]}
+    with torch.no_grad():
+        logits = torch.as_tensor(model(**sample).logits).numpy()
+    signature = mlflow.models.infer_signature({k: v.numpy() for k, v in sample.items()}, logits)
+    mlflow.log_dict(signature.to_dict(), "signature.json")
+
+
+# --- OpenTelemetry ----------------------------------------------------------------------
+
+_current_stage = None
+
+
+def _observe_gpu_utilization(_options):
+    """Sampled by the periodic metric reader for as long as the process runs; 0 on
+    CPU-only hosts (specs §7 accepts that)."""
+    from opentelemetry.metrics import Observation
+
+    value = 0.0
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            value = float(torch.cuda.utilization())
+    except Exception:  # noqa: BLE001 -- telemetry must never fail a stage
+        pass
+    yield Observation(value, {"stage": _current_stage or "unknown"})
+
+
+def _otel_tracer():
+    """A tracer exporting to OTEL_EXPORTER_OTLP_ENDPOINT, with the GPU gauge registered
+    once per process; None when no collector is configured or the SDK is missing."""
+    if not os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT"):
+        return None
+    try:
+        from opentelemetry import metrics, trace
+        from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
+        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+        from opentelemetry.sdk.metrics import MeterProvider
+        from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
+        from opentelemetry.sdk.resources import Resource
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor
+    except ImportError:
+        return None
+
+    if not isinstance(trace.get_tracer_provider(), TracerProvider):
+        resource = Resource.create({"service.name": "jobfit-pipeline"})
+        tracer_provider = TracerProvider(resource=resource)
+        tracer_provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
+        trace.set_tracer_provider(tracer_provider)
+        reader = PeriodicExportingMetricReader(OTLPMetricExporter(), export_interval_millis=10_000)
+        metrics.set_meter_provider(MeterProvider(resource=resource, metric_readers=[reader]))
+        metrics.get_meter("jobfit.pipeline").create_observable_gauge(
+            "gpu_utilization_percent", callbacks=[_observe_gpu_utilization],
+            description="GPU utilization during a pipeline stage, 0 on CPU-only hosts",
+        )
+    return trace.get_tracer("jobfit.pipeline")
+
+
+@contextmanager
+def stage_span(name):
+    """Wraps a stage in an OTel span and attributes GPU-utilization samples to it."""
+    global _current_stage
+    _current_stage = name
+    tracer = _otel_tracer()
+    if tracer is None:
+        yield
+        return
+    with tracer.start_as_current_span(name):
+        yield

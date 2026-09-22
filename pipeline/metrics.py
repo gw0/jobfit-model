@@ -1,5 +1,6 @@
-"""Evaluation statistics over numpy arrays: masking, per-aspect MAE/Spearman,
-bootstrap CIs, and the two non-learned baselines. No model or file I/O.
+"""Evaluation and calibration statistics over numpy arrays: masking, per-aspect
+MAE/Spearman, conformal calibration and coverage, bootstrap CIs, and the two
+non-learned baselines. No model or file I/O.
 
 Shapes: preds_q (N, NUM_ASPECTS, len(QUANTILES)); targets/confidences (N, NUM_ASPECTS).
 """
@@ -10,7 +11,10 @@ import warnings
 import numpy as np
 from scipy import stats
 
-from common import ASPECT_IDS, MID
+from common import ASPECT_IDS, HIGH, LOW, MID
+
+COVERAGE = 0.90
+WIDTH_PERCENTILE = 90
 
 
 def masked_columns(preds, targets, confidences, confidence_floor):
@@ -61,6 +65,54 @@ def compute_metrics(preds_q, targets, confidences, confidence_floor):
         aid: {"n": len(t), "mae": mae(p, t), "spearman_rho": spearman(p, t)}
         for aid, p, t, _ in masked_columns(preds_mid, targets, confidences, confidence_floor)
     }
+
+
+# --- conformal calibration --------------------------------------------------------------
+
+def conformal_delta(pred_low, pred_high, target, coverage=COVERAGE):
+    """Split-conformal (CQR) adjustment: widening [low, high] by delta on both sides
+    covers `coverage` of held-out targets. NaN with no examples."""
+    n = len(target)
+    if n == 0:
+        return math.nan
+    scores = np.sort(np.maximum(pred_low - target, target - pred_high))
+    return float(scores[min(n - 1, max(0, math.ceil((n + 1) * coverage) - 1))])
+
+
+def width_threshold(widths, percentile=WIDTH_PERCENTILE):
+    """Nearest-rank percentile of calibrated interval widths: wider predictions read
+    "insufficient data" in the UI."""
+    if len(widths) == 0:
+        return math.nan
+    return float(np.sort(widths)[min(len(widths) - 1, max(0, math.ceil(percentile / 100 * len(widths)) - 1))])
+
+
+def fit_calibration(preds_q, targets, confidences, confidence_floor, coverage=COVERAGE):
+    """{aspect_id: {"delta", "insufficient_data_threshold"}}, NaN for aspects with no
+    usable calibration examples."""
+    params = {}
+    for aid, p, t, _ in masked_columns(preds_q, targets, confidences, confidence_floor):
+        delta = conformal_delta(p[:, LOW], p[:, HIGH], t, coverage)
+        widths = p[:, HIGH] - p[:, LOW] + 2 * delta
+        params[aid] = {"delta": delta, "insufficient_data_threshold": width_threshold(widths)}
+    return params
+
+
+def compute_coverage(preds_q, targets, confidences, calibration, confidence_floor):
+    """{aspect_id: {"coverage", "mean_width"}} of the calibrated intervals, applying a
+    fixed calibration fit -- never re-fitting it here."""
+    result = {}
+    for aid, p, t, _ in masked_columns(preds_q, targets, confidences, confidence_floor):
+        delta = calibration.get(aid, {}).get("delta", math.nan)
+        if math.isnan(delta) or len(t) == 0:
+            result[aid] = {"coverage": math.nan, "mean_width": math.nan}
+            continue
+        low, high = p[:, LOW] - delta, p[:, HIGH] + delta
+        result[aid] = {
+            "coverage": float(np.mean((low <= t) & (t <= high))),
+            "mean_width": float(np.mean(high - low)),
+        }
+    return result
 
 
 # --- bootstrap ----------------------------------------------------------------------------

@@ -2,10 +2,12 @@
 """`evaluate` stage (specs §4), run after every stage that changes the model.
 
 Per-aspect MAE and Spearman rho against the train-mean and keyword-overlap baselines,
-bootstrap MAE CIs over CVs and the shuffled-pair control. The model is chosen by --stage:
+bootstrap MAE CIs over CVs, the shuffled-pair control and, for calibrated stages,
+coverage and mean interval width. The model and calibration are chosen by --stage:
 
     headtrained  checkpoints/headtrain
     finetuned    checkpoints/finetune
+    calibrated   checkpoints/finetune + calibration/params.json
 
 Usage:
     ./pipeline/evaluate.py --dataset-dir datasets_smoke --runs-dir runs_smoke --stage finetuned
@@ -27,7 +29,12 @@ def model_dir(runs_dir, slug, stage):
     return {
         "headtrained": base / "checkpoints" / "headtrain",
         "finetuned": base / "checkpoints" / "finetune",
+        "calibrated": base / "checkpoints" / "finetune",
     }[stage]
+
+
+def calibration_path(runs_dir, slug, stage):
+    return runs_dir / slug / "calibration" / "params.json" if stage == "calibrated" else None
 
 
 def _load_model(path):
@@ -80,6 +87,8 @@ def _run_jevbench(model_path):
 
 
 def _run(args):
+    import mlflow
+
     slug = common.model_slug(args.model)
     out_path = args.runs_dir / slug / "eval" / f"{args.stage}.json"
     cache = common.load_cache(args.runs_dir, slug, args.split)
@@ -97,6 +106,12 @@ def _run(args):
     targets, confidences = common.build_targets(cache["pairs"], labels)
     floor = args.confidence_floor
     report_metrics = metrics.compute_metrics(preds_q, targets, confidences, floor)
+
+    calib_path = calibration_path(args.runs_dir, slug, args.stage)
+    if calib_path is not None:
+        coverage = metrics.compute_coverage(preds_q, targets, confidences, common.read_json(calib_path), floor)
+        for aid in common.ASPECT_IDS:
+            report_metrics[aid].update(coverage[aid])
 
     train_cache = common.load_cache(args.runs_dir, slug, "train")
     shuffled_cache = common.load_cache(args.runs_dir, slug, f"{args.split}_shuffled")
@@ -120,6 +135,17 @@ def _run(args):
     common.write_json(out_path, report)
     print(f"evaluated {report['n']} pair(s) on split {args.split!r} -> {out_path}")
 
+    with common.mlflow_run("evaluate", args.model, args.run_group, tags={"eval_stage": args.stage}):
+        mlflow.log_params({"split": args.split, "n_pairs": report["n"]})
+        summary = {
+            "mean_mae": metrics.nanmean([m["mae"] for m in report_metrics.values()]),
+            "mean_abs_shift": metrics.nanmean([s["mean_abs_shift"] for s in shuffled.values()]) if shuffled else np.nan,
+        }
+        mlflow.log_metrics({k: v for k, v in summary.items() if not np.isnan(v)})
+        common.log_dataset_input(cache, args.runs_dir, slug, args.split, context="evaluation")
+        if train_cache is not None:
+            common.log_dataset_input(train_cache, args.runs_dir, slug, "train", context="baseline_fit")
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -128,7 +154,8 @@ def main():
     parser.add_argument("--split", default="test")
     parser.add_argument("--run-jevbench", action="store_true")
     args = parser.parse_args()
-    _run(args)
+    with common.stage_span("evaluate"):
+        _run(args)
 
 
 if __name__ == "__main__":

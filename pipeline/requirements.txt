@@ -3,11 +3,18 @@ transformers
 peft
 numpy
 scipy
+# mlflow 3.16.1's split mlflow/mlflow-skinny/mlflow-tracing packages fail at import time
+# with a circular import (mlflow.tracing.utils.otlp -> mlflow.utils.credentials); 2.22.5
+# is the newest 2.x with a wheel for Python 3.13.
+mlflow==2.22.5
 
 # prepare.py's PII scan reuses data/pii_scrub.py.
 presidio-analyzer
 presidio-anonymizer
 spacy
+
+# OTLP exporter for common.stage_span.
+opentelemetry-exporter-otlp-proto-grpc
 
 # CPU-only wheel; GPU hosts install a CUDA build instead.
 --extra-index-url https://download.pytorch.org/whl/cpu
