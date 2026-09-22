@@ -5,7 +5,8 @@
 #              generation and labeling (needs an authenticated `claude` CLI), the
 #              dataset build and the Dockerized pipeline.
 
-.PHONY: venv build test smoke-fetch-jobs smoke-cvs smoke-dataset smoke-labels smoke-prepare
+.PHONY: venv build test smoke-fetch-jobs smoke-cvs smoke-dataset smoke-labels \
+	smoke-prepare smoke-headtrain smoke-finetune
 
 VENV ?= .venv/bin
 PY ?= $(VENV)/python
@@ -16,7 +17,7 @@ export PATH := $(CURDIR)/.venv/bin:$(PATH)
 
 venv:
 	python3 -m venv .venv
-	$(PY) -m pip install -q pytest -r data/requirements.txt -r pipeline/requirements.txt
+	$(PY) -m pip install -q pytest scipy -r data/requirements.txt -r pipeline/requirements.txt
 	$(PY) -m spacy download en_core_web_sm
 
 build:
@@ -51,3 +52,11 @@ STAGE_ARGS = --dataset-dir /data --runs-dir /runs --model $(MODEL)
 smoke-prepare: build
 	mkdir -p runs_smoke
 	$(DOCKER_RUN) ./pipeline/prepare.py $(STAGE_ARGS)
+
+smoke-headtrain: smoke-prepare
+	$(DOCKER_RUN) ./pipeline/train.py --stage headtrain $(STAGE_ARGS)
+	$(DOCKER_RUN) ./pipeline/evaluate.py --stage headtrained $(STAGE_ARGS)
+
+smoke-finetune: smoke-headtrain
+	$(DOCKER_RUN) ./pipeline/train.py --stage finetune $(STAGE_ARGS)
+	$(DOCKER_RUN) ./pipeline/evaluate.py --stage finetuned $(STAGE_ARGS)

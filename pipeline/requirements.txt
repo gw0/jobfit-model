@@ -1,6 +1,8 @@
 # The shared pipeline image (docker/pipeline.Dockerfile).
 transformers
+peft
 numpy
+scipy
 
 # prepare.py's PII scan reuses data/pii_scrub.py.
 presidio-analyzer

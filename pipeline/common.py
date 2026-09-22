@@ -1,8 +1,9 @@
 """Shared pipeline plumbing: aspect constants, JSON/cache I/O, label -> target joining,
-tokenizer loading and CLI args. transformers is imported lazily, so the pure helpers are
-testable without it.
+the pinball loss, model loading and batched inference, and CLI args. torch/transformers
+are imported lazily, so the pure helpers are testable without them.
 """
 
+import hashlib
 import json
 import math
 import sys
@@ -19,6 +20,10 @@ with open(REPO_ROOT / "aspects.json", encoding="utf-8") as f:
 ASPECT_IDS = [a["id"] for a in ASPECTS]
 NUM_ASPECTS = len(ASPECT_IDS)
 
+QUANTILES = (0.05, 0.5, 0.95)
+LOW, MID, HIGH = 0, 1, 2  # positions in QUANTILES
+NUM_LABELS = NUM_ASPECTS * len(QUANTILES)
+
 # Label field names for the cv/job-scope aspects, as written by data/label_docs.py.
 CV_JOB_FIELD = {
     "cv_clarity_structure_quality": "clarity",
@@ -28,6 +33,7 @@ CV_JOB_FIELD = {
 }
 
 DEFAULT_MODEL = "Qwen/Qwen3-0.6B"
+STAGES = ("headtrained", "finetuned")
 
 
 def add_common_args(parser):
@@ -112,7 +118,39 @@ def build_targets(pairs, labels):
     return np.array(targets, dtype=float).reshape(shape), np.array(confidences, dtype=float).reshape(shape)
 
 
+# --- loss ------------------------------------------------------------------------------
+
+def pinball_loss(preds, targets, confidences, confidence_floor):
+    """Confidence-weighted pinball loss. preds: (B, NUM_ASPECTS, len(QUANTILES));
+    targets/confidences: (B, NUM_ASPECTS). NaN or below-floor targets are masked out;
+    a batch with nothing left yields a zero loss."""
+    import torch
+
+    mask = ~targets.isnan() & (confidences >= confidence_floor)
+    weights = torch.where(mask, confidences, torch.zeros_like(confidences))
+    quantiles = torch.tensor(QUANTILES, dtype=preds.dtype, device=preds.device)
+    diff = torch.nan_to_num(targets).unsqueeze(-1) - preds
+    loss = torch.maximum(quantiles * diff, (quantiles - 1) * diff).sum(-1)
+    return (loss * weights).sum() / (weights.sum() * len(QUANTILES)).clamp_min(1e-12)
+
+
 # --- model -----------------------------------------------------------------------------
+
+def freeze_backbone(model):
+    """Freezes every parameter under the HF `base_model_prefix`, leaving the head trainable."""
+    for name, param in model.named_parameters():
+        param.requires_grad = not name.startswith(model.base_model_prefix)
+
+
+def backbone_state_dict_hash(model):
+    """sha256 over the backbone's raw parameter bytes (specs §4's freeze assertion)."""
+    h = hashlib.sha256()
+    for name, param in sorted(model.named_parameters(), key=lambda kv: kv[0]):
+        if name.startswith(model.base_model_prefix):
+            h.update(name.encode())
+            h.update(param.detach().cpu().float().numpy().tobytes())
+    return h.hexdigest()
+
 
 def load_tokenizer(model_name_or_path):
     from transformers import AutoTokenizer
@@ -121,6 +159,43 @@ def load_tokenizer(model_name_or_path):
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     return tokenizer
+
+
+def load_classification_model(model_name_or_path, pad_token_id):
+    """The quantile-head classifier. sdpa attention avoids materialising the full
+    2048x2048 attention matrix. fp32, not bf16: CPUs without native bf16 emulate it far
+    too slowly to train on. `pad_token_id` must be the tokenizer's real pad id -- HF
+    pools the last position where `input_ids != pad_token_id`, not by attention mask."""
+    import torch
+    from transformers import AutoModelForSequenceClassification
+
+    model = AutoModelForSequenceClassification.from_pretrained(
+        model_name_or_path, num_labels=NUM_LABELS, problem_type="regression",
+        attn_implementation="sdpa", dtype=torch.float32, low_cpu_mem_usage=True,
+    )
+    model.config.pad_token_id = pad_token_id
+    model.config.use_cache = False
+    return model
+
+
+def reshape_quantile_logits(logits):
+    """(B, NUM_LABELS) -> (B, NUM_ASPECTS, len(QUANTILES)), aspect-major."""
+    return logits.reshape(logits.shape[0], NUM_ASPECTS, len(QUANTILES))
+
+
+def predict_quantiles_batched(model, input_ids, attention_mask, batch_size=4):
+    """Quantile predictions as a numpy (N, NUM_ASPECTS, 3) array, sorted per aspect so
+    low <= mid <= high even where the raw head outputs cross. Works for a torch model
+    and an optimum ORTModel alike."""
+    import torch
+
+    chunks = []
+    for start in range(0, input_ids.shape[0], batch_size):
+        with torch.no_grad():
+            outputs = model(input_ids=input_ids[start:start + batch_size],
+                            attention_mask=attention_mask[start:start + batch_size])
+        chunks.append(reshape_quantile_logits(torch.as_tensor(outputs.logits)).float().numpy())
+    return np.sort(np.concatenate(chunks), axis=-1)
 
 
 # --- cache (prepare.py's tokenized splits) ---------------------------------------------
