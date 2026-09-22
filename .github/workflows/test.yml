@@ -15,5 +15,5 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m venv .venv
-          .venv/bin/pip install -q pytest -r data/requirements-fetch.txt
+          .venv/bin/pip install -q pytest numpy -r data/requirements-fetch.txt
       - run: make test

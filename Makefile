@@ -2,19 +2,21 @@
 #              no credentials -- this is what CI runs.
 # make build   the pipeline Docker image.
 # smoke-*      the live chain against datasets_smoke/: job fetching, `claude -p` CV
-#              generation and labeling (needs an authenticated `claude` CLI) and the dataset build.
+#              generation and labeling (needs an authenticated `claude` CLI), the
+#              dataset build and the Dockerized pipeline.
 
-.PHONY: venv build test smoke-fetch-jobs smoke-cvs smoke-dataset smoke-labels
+.PHONY: venv build test smoke-fetch-jobs smoke-cvs smoke-dataset smoke-labels smoke-prepare
 
 VENV ?= .venv/bin
 PY ?= $(VENV)/python
+MODEL ?= Qwen/Qwen3-0.6B
 
 # Entry-point scripts use `#!/usr/bin/env python3`; resolve that to the venv.
 export PATH := $(CURDIR)/.venv/bin:$(PATH)
 
 venv:
 	python3 -m venv .venv
-	$(PY) -m pip install -q pytest -r data/requirements.txt
+	$(PY) -m pip install -q pytest -r data/requirements.txt -r pipeline/requirements.txt
 	$(PY) -m spacy download en_core_web_sm
 
 build:
@@ -39,3 +41,13 @@ smoke-dataset:
 
 smoke-labels:
 	./data/label_dataset.py --out-dir datasets_smoke --double-label --double-label-sample 3
+
+# --- pipeline (Docker, CPU) -----------------------------------------------------------
+# The corpus is mounted read-only; every stage writes only into runs_smoke/.
+
+DOCKER_RUN = docker run --rm -v $(CURDIR)/datasets_smoke:/data:ro -v $(CURDIR)/runs_smoke:/runs jobfit-pipeline
+STAGE_ARGS = --dataset-dir /data --runs-dir /runs --model $(MODEL)
+
+smoke-prepare: build
+	mkdir -p runs_smoke
+	$(DOCKER_RUN) ./pipeline/prepare.py $(STAGE_ARGS)
