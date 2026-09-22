@@ -1,0 +1,173 @@
+# Argo Workflows DAG (specs §6): prepare -> headtrain -> evaluate -> finetune -> evaluate
+# -> calibrate -> evaluate -> export -> evaluate -> publish, one shared jobfit-pipeline
+# image. One workflow per candidate; every stage's MLflow run nests under a parent run
+# named after the workflow (--run-group).
+#
+# Usage: argo submit -n jobfit pipeline/workflow.yaml --generate-name jobfit-run-<slug>- -p model=<hf-id>
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: jobfit-run-
+  namespace: jobfit
+spec:
+  entrypoint: pipeline
+  # Bound to workflowtaskresults create/patch by infra/argo/executor-rbac.yaml.
+  serviceAccountName: argo-workflow
+  arguments:
+    parameters:
+      - name: model
+        value: "Qwen/Qwen3-0.6B"
+      - name: lora-rank
+        value: "8"
+      - name: lora-alpha
+        value: "16"
+      - name: lr-headtrain
+        value: "1e-3"
+      - name: lr-finetune
+        value: "1e-4"
+      - name: epochs-headtrain
+        value: "30"
+      - name: epochs-finetune
+        value: "5"
+
+  # `dataset` is the committed corpus, mounted read-only; `runs` holds pipeline output.
+  volumes:
+    - name: dataset
+      persistentVolumeClaim:
+        claimName: jobfit-dataset
+    - name: runs
+      persistentVolumeClaim:
+        claimName: jobfit-runs
+
+  templates:
+    - name: pipeline
+      dag:
+        tasks:
+          - name: prepare
+            template: stage
+            arguments:
+              parameters:
+                - name: command
+                  value: >-
+                    ./pipeline/prepare.py
+                    --dataset-dir /data --runs-dir /runs --model {{workflow.parameters.model}} --run-group {{workflow.name}}
+
+          - name: headtrain
+            dependencies: [prepare]
+            template: stage
+            arguments:
+              parameters:
+                - name: command
+                  value: >-
+                    ./pipeline/train.py --stage headtrain
+                    --dataset-dir /data --runs-dir /runs --model {{workflow.parameters.model}} --run-group {{workflow.name}}
+                    --lr {{workflow.parameters.lr-headtrain}}
+                    --epochs {{workflow.parameters.epochs-headtrain}}
+
+          - name: evaluate-headtrained
+            dependencies: [headtrain]
+            template: stage
+            arguments:
+              parameters:
+                - name: command
+                  value: >-
+                    ./pipeline/evaluate.py --stage headtrained
+                    --dataset-dir /data --runs-dir /runs --model {{workflow.parameters.model}} --run-group {{workflow.name}}
+
+          - name: finetune
+            dependencies: [evaluate-headtrained]
+            template: stage
+            arguments:
+              parameters:
+                - name: command
+                  value: >-
+                    ./pipeline/train.py --stage finetune
+                    --dataset-dir /data --runs-dir /runs --model {{workflow.parameters.model}} --run-group {{workflow.name}}
+                    --lr {{workflow.parameters.lr-finetune}}
+                    --epochs {{workflow.parameters.epochs-finetune}}
+                    --lora-rank {{workflow.parameters.lora-rank}}
+                    --lora-alpha {{workflow.parameters.lora-alpha}}
+
+          - name: evaluate-finetuned
+            dependencies: [finetune]
+            template: stage
+            arguments:
+              parameters:
+                - name: command
+                  value: >-
+                    ./pipeline/evaluate.py --stage finetuned
+                    --dataset-dir /data --runs-dir /runs --model {{workflow.parameters.model}} --run-group {{workflow.name}}
+
+          - name: calibrate
+            dependencies: [evaluate-finetuned]
+            template: stage
+            arguments:
+              parameters:
+                - name: command
+                  value: >-
+                    ./pipeline/calibrate.py
+                    --dataset-dir /data --runs-dir /runs --model {{workflow.parameters.model}} --run-group {{workflow.name}}
+
+          - name: evaluate-calibrated
+            dependencies: [calibrate]
+            template: stage
+            arguments:
+              parameters:
+                - name: command
+                  value: >-
+                    ./pipeline/evaluate.py --stage calibrated
+                    --dataset-dir /data --runs-dir /runs --model {{workflow.parameters.model}} --run-group {{workflow.name}}
+
+          - name: export
+            dependencies: [evaluate-calibrated]
+            template: stage
+            arguments:
+              parameters:
+                - name: command
+                  value: >-
+                    ./pipeline/export.py
+                    --dataset-dir /data --runs-dir /runs --model {{workflow.parameters.model}} --run-group {{workflow.name}}
+
+          - name: evaluate-quantized
+            dependencies: [export]
+            template: stage
+            arguments:
+              parameters:
+                - name: command
+                  value: >-
+                    ./pipeline/evaluate.py --stage quantized
+                    --dataset-dir /data --runs-dir /runs --model {{workflow.parameters.model}} --run-group {{workflow.name}}
+
+          - name: publish
+            dependencies: [evaluate-quantized]
+            template: stage
+            arguments:
+              parameters:
+                - name: command
+                  value: >-
+                    ./pipeline/publish.py
+                    --dataset-dir /data --runs-dir /runs --model {{workflow.parameters.model}} --run-group {{workflow.name}}
+
+    # One shared template, so pods are named <workflow>-stage-<hash>; the task name is in
+    # the workflows.argoproj.io/node-name annotation (see `make cluster-logs`).
+    - name: stage
+      inputs:
+        parameters:
+          - name: command
+      container:
+        image: jobfit-pipeline:latest
+        # Loaded into the node by `kind load docker-image`; there is no registry to pull from.
+        imagePullPolicy: IfNotPresent
+        command: ["bash", "-c"]
+        args: ["{{inputs.parameters.command}}"]
+        env:
+          - name: MLFLOW_TRACKING_URI
+            value: "http://mlflow.jobfit.svc.cluster.local:5000"
+          - name: OTEL_EXPORTER_OTLP_ENDPOINT
+            value: "http://otel-collector.jobfit.svc.cluster.local:4317"
+        volumeMounts:
+          - name: dataset
+            mountPath: /data
+            readOnly: true
+          - name: runs
+            mountPath: /runs

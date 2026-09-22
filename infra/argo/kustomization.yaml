@@ -1,0 +1,12 @@
+# Argo Workflows controller from its upstream manifests, namespaced into `jobfit`.
+# cluster-install rather than quick-start: the quick-starts also deploy a demo MinIO
+# (whose pinned Docker Hub tag no longer pulls anonymously) that this pipeline, using
+# only hostPath PVs, has no use for.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: jobfit
+
+resources:
+  - github.com/argoproj/argo-workflows/manifests/cluster-install?ref=v3.6.2
+  - executor-rbac.yaml

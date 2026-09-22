@@ -1,0 +1,18 @@
+# hostPath-backed PV for pipeline/workflow.yaml's `dataset` volume (mounted /data by
+# every pipeline stage) -- same reasoning/pattern as mlflow-pv.yaml. Path matches
+# infra/kind-config.yaml's extraMounts containerPath.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: jobfit-dataset
+  labels:
+    app: jobfit-dataset
+spec:
+  capacity:
+    storage: 2Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  hostPath:
+    path: /mnt/jobfit-dataset
+    type: DirectoryOrCreate

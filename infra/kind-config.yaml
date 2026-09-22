@@ -1,0 +1,24 @@
+# Single-node KinD cluster (specs §7), provisioned on demand per training run and torn
+# down afterward -- no persistent, always-on cluster. Same manifest serves local
+# dev/test and the real run that produces the shipped model.
+#
+# Usage: kind create cluster --name jobfit --config infra/kind-config.yaml
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+    extraMounts:
+      # hostPath source for MLflow's artifact/tracking PV (specs §7) -- bind-mounted
+      # into the node so infra/kustomize/base/mlflow-pv.yaml's hostPath resolves inside
+      # the KinD node's filesystem, not the host's.
+      - hostPath: ./.kind/mlflow-data
+        containerPath: /mnt/mlflow-data
+      # hostPath source for pipeline/workflow.yaml's `dataset` volume -- point this at
+      # a real datasets/ (or datasets_smoke/) checkout before `kind create cluster`.
+      - hostPath: ./datasets
+        containerPath: /mnt/jobfit-dataset
+      # hostPath source for pipeline/workflow.yaml's `runs` volume -- separate from
+      # `dataset` above so pipeline output never gets mixed into the committed corpus
+      # checkout. Point this at ./runs (or ./runs_smoke).
+      - hostPath: ./runs
+        containerPath: /mnt/jobfit-runs

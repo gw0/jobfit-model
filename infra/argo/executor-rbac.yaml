@@ -1,0 +1,29 @@
+# ServiceAccount for workflow pods (pipeline/workflow.yaml's serviceAccountName).
+# cluster-install binds none, and without create/patch on workflowtaskresults the
+# executor cannot report step status back to the controller. See
+# https://argo-workflows.readthedocs.io/en/release-3.6/workflow-rbac/
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: argo-workflow
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: argo-workflow-executor
+rules:
+  - apiGroups: ["argoproj.io"]
+    resources: ["workflowtaskresults"]
+    verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: argo-workflow-executor
+subjects:
+  - kind: ServiceAccount
+    name: argo-workflow
+roleRef:
+  kind: Role
+  name: argo-workflow-executor
+  apiGroup: rbac.authorization.k8s.io

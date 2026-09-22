@@ -1,0 +1,12 @@
+# In-cluster address for pipeline pods: mlflow.jobfit.svc.cluster.local:5000, set as
+# MLFLOW_TRACKING_URI in pipeline/workflow.yaml.
+apiVersion: v1
+kind: Service
+metadata:
+  name: mlflow
+spec:
+  selector:
+    app: mlflow
+  ports:
+    - port: 5000
+      targetPort: 5000

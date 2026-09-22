@@ -1,0 +1,17 @@
+# hostPath-backed PV for pipeline/workflow.yaml's `runs` volume (pipeline output),
+# kept apart from the read-only `dataset` volume. Path matches infra/kind-config.yaml.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: jobfit-runs
+  labels:
+    app: jobfit-runs
+spec:
+  capacity:
+    storage: 10Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  hostPath:
+    path: /mnt/jobfit-runs
+    type: DirectoryOrCreate

@@ -1,0 +1,39 @@
+# MLflow as a real server process (specs §6/§7) -- comes up with the cluster for the
+# duration of a training run and is torn down with it, not always-on.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mlflow
+  labels:
+    app: mlflow
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mlflow
+  template:
+    metadata:
+      labels:
+        app: mlflow
+    spec:
+      containers:
+        - name: mlflow
+          # No v2.22.5 server image was published; v2.22.4 is protocol-compatible with
+          # the mlflow==2.22.5 client pinned in pipeline/requirements.txt.
+          image: ghcr.io/mlflow/mlflow:v2.22.4
+          command: ["mlflow"]
+          args:
+            - server
+            - --host=0.0.0.0
+            - --port=5000
+            - --backend-store-uri=sqlite:////mlflow-data/mlflow.db
+            - --default-artifact-root=/mlflow-data/artifacts
+          ports:
+            - containerPort: 5000
+          volumeMounts:
+            - name: data
+              mountPath: /mlflow-data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: mlflow-data

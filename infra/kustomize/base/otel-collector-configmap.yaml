@@ -1,0 +1,38 @@
+# OTLP receiver for the pipeline stages (common.stage_span): spans go to the debug
+# exporter (their arrival shows in the collector's own :8888 counters), metrics --
+# gpu_utilization_percent -- to the Prometheus exporter on :8889.
+#
+# Endpoints are bound to 0.0.0.0 explicitly: the collector's defaults bind loopback,
+# which the Service cannot reach.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector-config
+data:
+  config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+    exporters:
+      prometheus:
+        endpoint: 0.0.0.0:8889
+        # A stage's last sample must outlive the whole run (hours on CPU); the cluster is
+        # torn down after each run, so nothing accumulates.
+        metric_expiration: 24h
+      debug:
+        verbosity: basic
+    service:
+      telemetry:
+        metrics:
+          address: 0.0.0.0:8888
+      pipelines:
+        traces:
+          receivers: [otlp]
+          exporters: [debug]
+        metrics:
+          receivers: [otlp]
+          exporters: [prometheus, debug]

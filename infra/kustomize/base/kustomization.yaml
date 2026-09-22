@@ -1,0 +1,22 @@
+# specs §7: MLflow server + OTel collector, isolated in a dedicated `jobfit` namespace
+# so nothing here collides with unrelated workloads already on the KinD host.
+#
+# Usage: kubectl apply -k infra/kustomize/base
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: jobfit
+
+resources:
+  - namespace.yaml
+  - mlflow-pv.yaml
+  - mlflow-pvc.yaml
+  - mlflow-deployment.yaml
+  - mlflow-service.yaml
+  - dataset-pv.yaml
+  - dataset-pvc.yaml
+  - runs-pv.yaml
+  - runs-pvc.yaml
+  - otel-collector-configmap.yaml
+  - otel-collector-deployment.yaml
+  - otel-collector-service.yaml
