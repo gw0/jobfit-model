@@ -1,5 +1,5 @@
-"""Shared pipeline plumbing: aspect constants, JSON/cache I/O, label -> target joining,
-the pinball loss, model loading and batched inference, CLI args, MLflow runs and OTel
+"""Shared pipeline plumbing: JobFit's questions and state, JSON/cache I/O, label ->
+target joining, model loading and batched inference, CLI args, MLflow runs and OTel
 spans. torch/transformers/mlflow/opentelemetry are imported lazily, so the pure
 helpers are testable without them.
 """
@@ -15,38 +15,42 @@ from pathlib import Path
 
 import numpy as np
 
+import jev
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "data"))
 import corpus  # noqa: E402
 
-with open(REPO_ROOT / "aspects.json", encoding="utf-8") as f:
-    ASPECTS = json.load(f)
-ASPECT_IDS = [a["id"] for a in ASPECTS]
-NUM_ASPECTS = len(ASPECT_IDS)
+QUESTIONS = corpus.load_questions()
+QUESTION_IDS = list(QUESTIONS)
+NUM_QUESTIONS = len(QUESTION_IDS)
 
-QUANTILES = (0.05, 0.5, 0.95)
-LOW, MID, HIGH = 0, 1, 2  # positions in QUANTILES
-NUM_LABELS = NUM_ASPECTS * len(QUANTILES)
-
-# Label field names for the cv/job-scope aspects, as written by data/label_docs.py.
-CV_JOB_FIELD = {
-    "cv_clarity_structure_quality": "clarity",
-    "cv_likely_llm_generated": "llm_generated",
-    "job_post_clarity_structure_quality": "clarity",
-    "job_post_likely_llm_generated": "llm_generated",
-}
+# JobFit's state is {CV, Job description}; frontend/src/jobfit.mjs mirrors these.
+PART_BUDGET = 1024
+QUESTIONS_BUDGET = 1024
 
 DEFAULT_MODEL = "Qwen/Qwen3-0.6B"
-STAGES = ("headtrained", "finetuned", "calibrated", "quantized")
+STAGES = ("zeroshot", "finetuned", "calibrated", "quantized")
 MLFLOW_EXPERIMENT = "jobfit-pipeline"
+
+
+def jobfit_state(cv_text, jd_text):
+    return {"CV": cv_text, "Job description": jd_text}
+
+
+def num_levels(qid):
+    return len(QUESTIONS[qid]["criteria"])
 
 
 def add_common_args(parser):
     parser.add_argument("--dataset-dir", type=Path, default=REPO_ROOT / "datasets",
                         help="committed corpus (cvs/jobs/labels/splits), read-only")
     parser.add_argument("--runs-dir", type=Path, default=REPO_ROOT / "runs",
-                        help="pipeline output, one <model-slug>/ subdirectory per candidate")
+                        help="pipeline output, one <candidate>/ subdirectory per candidate")
     parser.add_argument("--model", default=DEFAULT_MODEL, help="HF base model id")
+    parser.add_argument("--candidate", default=None,
+                        help="this run's name: the model slug for default settings, else the slug "
+                             "plus what changed, e.g. qwen3-0.6b-r16 (default: the model slug)")
     parser.add_argument("--confidence-floor", type=float, default=0.3,
                         help="labels below this judge confidence are masked out")
     parser.add_argument("--batch-size", type=int, default=4)
@@ -57,6 +61,22 @@ def add_common_args(parser):
 
 def model_slug(model_name):
     return model_name.split("/")[-1].lower()
+
+
+def parse_args(parser, stage=None, argv=None):
+    """Parses a stage's CLI and sets `args.candidate` (default: the model slug) and
+    `args.run_dir` (<runs-dir>/<candidate>). A stage that builds the candidate passes
+    its `stage` name to record its settings under that key in <run-dir>/config.json --
+    the candidate's name is only a label, config.json is what it was run with."""
+    args = parser.parse_args(argv)
+    args.candidate = args.candidate or model_slug(args.model)
+    args.run_dir = args.runs_dir / args.candidate
+    if stage is not None:
+        path = args.run_dir / "config.json"
+        config = read_json(path) if path.is_file() else {}
+        config[stage] = {k: v for k, v in vars(args).items() if not isinstance(v, Path) and k != "run_group"}
+        write_json(path, config)
+    return args
 
 
 # --- JSON with NaN <-> null ------------------------------------------------------------
@@ -103,8 +123,8 @@ def load_labels(dataset_dir):
 
 
 def build_targets(pairs, labels):
-    """(targets, confidences), both float arrays of shape (len(pairs), NUM_ASPECTS),
-    NaN wherever a label is missing."""
+    """(targets, confidences), both float arrays of shape (len(pairs), NUM_QUESTIONS),
+    targets on the labels' [0,1] scale, NaN wherever a label is missing."""
     cv_labels, job_labels, pair_labels = labels
     targets, confidences = [], []
     for pair in pairs:
@@ -114,48 +134,64 @@ def build_targets(pairs, labels):
             "job": job_labels.get(pair["job"], {}),
         }
         row_t, row_c = [], []
-        for aspect in ASPECTS:
-            field = aspect["id"] if aspect["scope"] == "pairwise" else CV_JOB_FIELD[aspect["id"]]
-            record = records[aspect["scope"]]
-            row_t.append(record.get(f"{field}_score"))
-            row_c.append(record.get(f"{field}_confidence"))
+        for qid, question in QUESTIONS.items():
+            record = records[question["scope"]]
+            row_t.append(record.get(f"{qid}_score"))
+            row_c.append(record.get(f"{qid}_confidence"))
         targets.append(row_t)
         confidences.append(row_c)
-    shape = (len(pairs), NUM_ASPECTS)
+    shape = (len(pairs), NUM_QUESTIONS)
     return np.array(targets, dtype=float).reshape(shape), np.array(confidences, dtype=float).reshape(shape)
 
 
-# --- loss ------------------------------------------------------------------------------
+def usable(targets, confidences, confidence_floor):
+    """(N, Q) bool: the label is present and its judge confidence is at/above the floor --
+    the one mask shared by the loss weights and every metric."""
+    targets, confidences = np.asarray(targets, dtype=float), np.asarray(confidences, dtype=float)
+    return ~np.isnan(targets) & (np.nan_to_num(confidences) >= confidence_floor)
 
-def pinball_loss(preds, targets, confidences, confidence_floor):
-    """Confidence-weighted pinball loss. preds: (B, NUM_ASPECTS, len(QUANTILES));
-    targets/confidences: (B, NUM_ASPECTS). NaN or below-floor targets are masked out;
-    a batch with nothing left yields a zero loss."""
-    import torch
 
-    mask = ~targets.isnan() & (confidences >= confidence_floor)
-    weights = torch.where(mask, confidences, torch.zeros_like(confidences))
-    quantiles = torch.tensor(QUANTILES, dtype=preds.dtype, device=preds.device)
-    diff = torch.nan_to_num(targets).unsqueeze(-1) - preds
-    loss = torch.maximum(quantiles * diff, (quantiles - 1) * diff).sum(-1)
-    return (loss * weights).sum() / (weights.sum() * len(QUANTILES)).clamp_min(1e-12)
+def label_weights(targets, confidences, confidence_floor):
+    """(N, Q) loss weights: the judge confidence, zero where the label is not usable."""
+    return np.where(usable(targets, confidences, confidence_floor), np.nan_to_num(confidences), 0.0)
+
+
+def answer_targets(targets):
+    """(N, Q, MAX_CANDIDATES) target distributions for [0,1] labels (zeros where missing)."""
+    dists = np.zeros((*targets.shape, jev.MAX_CANDIDATES))
+    for (i, j), y in np.ndenumerate(targets):
+        if not math.isnan(y):
+            qid = QUESTION_IDS[j]
+            dists[i, j] = jev.target(QUESTIONS[qid], y * (num_levels(qid) - 1))
+    return dists
+
+
+def read_scores(answer_logits, temperature=1.0):
+    """(scores, confidences), both (N, Q): each question's expected level on the labels'
+    [0,1] scale (score / (K-1)) and its ordinal confidence."""
+    answer_logits = np.asarray(answer_logits, dtype=float)
+    scores, confidences = np.empty(answer_logits.shape[:2]), np.empty(answer_logits.shape[:2])
+    for j, qid in enumerate(QUESTION_IDS):
+        k = num_levels(qid)
+        score, confidences[:, j] = jev.score_stats(jev.probabilities(answer_logits[:, j], k, temperature))
+        scores[:, j] = score / (k - 1)
+    return scores, confidences
+
+
+def temperature(calibration):
+    """A calibration's temperature, 1 (no scaling) before or without a fit."""
+    t = (calibration or {}).get("temperature", math.nan)
+    return 1.0 if math.isnan(t) else t
 
 
 # --- model -----------------------------------------------------------------------------
 
-def freeze_backbone(model):
-    """Freezes every parameter under the HF `base_model_prefix`, leaving the head trainable."""
-    for name, param in model.named_parameters():
-        param.requires_grad = not name.startswith(model.base_model_prefix)
-
-
-def backbone_state_dict_hash(model):
-    """sha256 over the backbone's raw parameter bytes (specs §4's freeze assertion)."""
+def state_dict_hash(model):
+    """sha256 over every parameter's raw bytes (the calibrate stage's no-weight-change assertion)."""
     h = hashlib.sha256()
     for name, param in sorted(model.named_parameters(), key=lambda kv: kv[0]):
-        if name.startswith(model.base_model_prefix):
-            h.update(name.encode())
-            h.update(param.detach().cpu().float().numpy().tobytes())
+        h.update(name.encode())
+        h.update(param.detach().cpu().float().numpy().tobytes())
     return h.hexdigest()
 
 
@@ -168,21 +204,21 @@ def load_tokenizer(model_name_or_path):
     return tokenizer
 
 
-def load_classification_model(model_name_or_path, pad_token_id):
-    """The quantile-head classifier. sdpa attention avoids materialising the full
-    2048x2048 attention matrix. fp32, not bf16: CPUs without native bf16 emulate it far
-    too slowly to train on. `pad_token_id` must be the tokenizer's real pad id -- HF
-    pools the last position where `input_ids != pad_token_id`, not by attention mask."""
+def load_jev_model(model_name_or_path, attn_implementation="sdpa", device=None):
+    """The causal LM (native lm_head intact) wrapped as a JevModel, on `device` (default:
+    CUDA when available, else CPU). fp32 weights, not bf16: CPUs without native bf16
+    emulate it far too slowly, and on CUDA train.py gets bf16 speed from autocast
+    instead, so every checkpoint is the same fp32 model whichever host trained it."""
     import torch
-    from transformers import AutoModelForSequenceClassification
+    from transformers import AutoModelForCausalLM
 
-    model = AutoModelForSequenceClassification.from_pretrained(
-        model_name_or_path, num_labels=NUM_LABELS, problem_type="regression",
-        attn_implementation="sdpa", dtype=torch.float32, low_cpu_mem_usage=True,
+    import jev_model
+
+    lm = AutoModelForCausalLM.from_pretrained(
+        model_name_or_path, attn_implementation=attn_implementation, dtype=torch.float32, low_cpu_mem_usage=True,
     )
-    model.config.pad_token_id = pad_token_id
-    model.config.use_cache = False
-    return model
+    lm.config.use_cache = False
+    return jev_model.JevModel(lm).to(device or ("cuda" if torch.cuda.is_available() else "cpu"))
 
 
 def onnx_bytes(directory):
@@ -190,38 +226,41 @@ def onnx_bytes(directory):
     return sum(f.stat().st_size for pattern in ("*.onnx", "*.onnx_data") for f in Path(directory).glob(pattern))
 
 
-def reshape_quantile_logits(logits):
-    """(B, NUM_LABELS) -> (B, NUM_ASPECTS, len(QUANTILES)), aspect-major."""
-    return logits.reshape(logits.shape[0], NUM_ASPECTS, len(QUANTILES))
+MODEL_INPUTS = ("input_ids", "segment_ids", "answer_positions")
 
 
-def predict_quantiles_batched(model, input_ids, attention_mask, batch_size=4):
-    """Quantile predictions as a numpy (N, NUM_ASPECTS, 3) array, sorted per aspect so
-    low <= mid <= high even where the raw head outputs cross. Works for a torch model
-    and an optimum ORTModel alike."""
+def predict_answer_logits(model, cache, batch_size=4):
+    """(N, Q, MAX_CANDIDATES) answer logits as numpy, for a JevModel or an ONNX Runtime
+    InferenceSession of its export alike."""
     import torch
 
     chunks = []
-    for start in range(0, input_ids.shape[0], batch_size):
-        with torch.no_grad():
-            outputs = model(input_ids=input_ids[start:start + batch_size],
-                            attention_mask=attention_mask[start:start + batch_size])
-        chunks.append(reshape_quantile_logits(torch.as_tensor(outputs.logits)).float().numpy())
-    return np.sort(np.concatenate(chunks), axis=-1)
+    for start in range(0, len(cache["pairs"]), batch_size):
+        batch = [cache[name][start:start + batch_size] for name in MODEL_INPUTS]
+        if isinstance(model, torch.nn.Module):
+            device = next((p.device for p in model.parameters()), torch.device("cpu"))
+            with torch.no_grad():
+                logits = model(*[t.to(device) for t in batch], cache["candidate_ids"].to(device))
+            chunks.append(logits.float().cpu().numpy())
+        else:
+            feeds = {name: t.numpy() for name, t in zip(MODEL_INPUTS, batch)}
+            chunks.append(model.run(["answer_logits"], {**feeds, "candidate_ids": cache["candidate_ids"].numpy()})[0])
+    return np.concatenate(chunks)
 
 
 # --- cache (prepare.py's tokenized splits) ---------------------------------------------
 
-def cache_path(runs_dir, slug, name):
-    return Path(runs_dir) / slug / "cache" / f"{name}.pt"
+def cache_path(run_dir, name):
+    return Path(run_dir) / "cache" / f"{name}.pt"
 
 
-def load_cache(runs_dir, slug, name):
-    """{"pairs", "input_ids", "attention_mask"} for one cached split, or None if that
-    split was empty -- at smoke scale some are."""
+def load_cache(run_dir, name):
+    """{"pairs", "input_ids", "segment_ids", "answer_positions", "candidate_ids",
+    "candidate_counts"} for one cached split, or None if that split was empty -- at
+    smoke scale some are."""
     import torch
 
-    path = cache_path(runs_dir, slug, name)
+    path = cache_path(run_dir, name)
     return torch.load(path, weights_only=False) if path.is_file() else None
 
 
@@ -258,15 +297,15 @@ def _group_parent_run_id(mlflow, run_group):
 
 
 @contextmanager
-def mlflow_run(stage, model, run_group=None, tags=None):
-    """An MLflow run tagged with stage/model/git SHA. With `run_group` (Argo passes the
-    workflow name) it is nested under that group's parent run. The tracking server is
-    taken from MLFLOW_TRACKING_URI, else a local ./mlruns store."""
+def mlflow_run(stage, args, tags=None):
+    """An MLflow run tagged with stage/model/candidate/git SHA. With `args.run_group`
+    (Argo passes the workflow name) it is nested under that group's parent run. The
+    tracking server is taken from MLFLOW_TRACKING_URI, else a local ./mlruns store."""
     import mlflow
 
     mlflow.set_experiment(MLFLOW_EXPERIMENT)
-    tags = {"stage": stage, "model": model, "git_sha": git_sha(), **(tags or {})}
-    run_name = f"{stage}-{model_slug(model)}"
+    tags = {"stage": stage, "model": args.model, "candidate": args.candidate, "git_sha": git_sha(), **(tags or {})}
+    run_name, run_group = f"{stage}-{args.candidate}", args.run_group
     if not run_group:
         with mlflow.start_run(run_name=run_name, tags=tags) as run:
             yield run
@@ -276,26 +315,25 @@ def mlflow_run(stage, model, run_group=None, tags=None):
             yield run
 
 
-def log_dataset_input(cache, runs_dir, slug, name, context):
+def log_dataset_input(cache, run_dir, name, context):
     """mlflow.log_input() lineage for a cached split, pointing at the real .pt file."""
     import mlflow
     import mlflow.data
 
     dataset = mlflow.data.from_numpy(
-        cache["input_ids"].numpy(), source=str(cache_path(runs_dir, slug, name)), name=f"{slug}-{name}"
+        cache["input_ids"].numpy(), source=str(cache_path(run_dir, name)), name=f"{Path(run_dir).name}-{name}"
     )
     mlflow.log_input(dataset, context=context)
 
 
-def log_model_signature(model, input_ids, attention_mask):
+def log_model_signature(model, cache):
     """Logs an inferred model signature from one sample forward pass."""
     import mlflow
-    import torch
 
-    sample = {"input_ids": input_ids[:1], "attention_mask": attention_mask[:1]}
-    with torch.no_grad():
-        logits = torch.as_tensor(model(**sample).logits).numpy()
-    signature = mlflow.models.infer_signature({k: v.numpy() for k, v in sample.items()}, logits)
+    one = {**{name: cache[name][:1] for name in MODEL_INPUTS}, "candidate_ids": cache["candidate_ids"],
+           "pairs": cache["pairs"][:1]}
+    inputs = {name: one[name].numpy() for name in (*MODEL_INPUTS, "candidate_ids")}
+    signature = mlflow.models.infer_signature(inputs, predict_answer_logits(model, one))
     mlflow.log_dict(signature.to_dict(), "signature.json")
 
 

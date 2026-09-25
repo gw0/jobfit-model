@@ -5,12 +5,12 @@ Pure functions, no I/O."""
 import math
 
 import metrics
-from common import NUM_ASPECTS, STAGES
+from common import NUM_QUESTIONS, STAGES
 
 STAGE_LABELS = {
-    "headtrained": "head-trained (backbone frozen)",
+    "zeroshot": "zero-shot (base model, prompted)",
     "finetuned": "fine-tuned (LoRA, end-to-end)",
-    "calibrated": "calibrated (conformal, pre-quantization)",
+    "calibrated": "calibrated (temperature, pre-quantization)",
     "quantized": "quantized (shipped, int8)",
 }
 
@@ -32,13 +32,13 @@ def mean_mae(result):
 
 
 def beats_floor_count(result):
-    """Aspects whose MAE beats the train-mean baseline (acceptance criterion 2)."""
+    """Questions whose MAE beats the train-mean baseline (acceptance criterion 2)."""
     if not _usable(result):
         return None
     floor = result.get("baselines", {}).get("train_mean", {})
     return sum(
-        1 for aid, m in result["metrics"].items()
-        if m["mae"] < floor.get(aid, {}).get("mae", math.nan)  # NaN compares False
+        1 for qid, m in result["metrics"].items()
+        if m["mae"] < floor.get(qid, {}).get("mae", math.nan)  # NaN compares False
     )
 
 
@@ -51,17 +51,19 @@ def candidate_score(by_stage):
 
 
 def pick_winner(candidates):
-    """candidates: {slug: {stage: eval_result}}. The lowest-scoring candidate, None if
-    no candidate has a usable result."""
-    scored = {slug: candidate_score(by_stage) for slug, by_stage in candidates.items()}
-    scored = {slug: s for slug, s in scored.items() if not math.isnan(s)}
+    """candidates: {candidate: {stage: eval_result}}. The lowest-scoring candidate, None
+    if no candidate has a usable result."""
+    scored = {name: candidate_score(by_stage) for name, by_stage in candidates.items()}
+    scored = {name: s for name, s in scored.items() if not math.isnan(s)}
     return min(scored, key=scored.get) if scored else None
 
 
-def assemble_report(candidate, model, git_sha, eval_by_stage, calibration_params, onnx_sizes, candidates=None):
-    """Quality vs. the floor baseline, calibration coverage/width and the shuffled-pair
-    shift per stage, deployability and JevBench drift. `candidates` ({slug: {stage:
-    eval_result}}) adds the cross-candidate comparison and winner."""
+def assemble_report(candidate, model, git_sha, eval_by_stage, calibration_params, onnx_sizes, candidates=None,
+                    config=None):
+    """Quality vs. the floor baseline, confidence-vs-error and the shuffled-pair shift
+    per stage, the shipped calibration, deployability and JevBench drift. `candidates`
+    ({candidate: {stage: eval_result}}) adds the cross-candidate comparison and winner;
+    `config` is the candidate's config.json, the settings it was run with."""
     quality, calibration = {}, {}
     for stage in STAGES:
         result = eval_by_stage.get(stage)
@@ -69,24 +71,25 @@ def assemble_report(candidate, model, git_sha, eval_by_stage, calibration_params
         quality[stage] = {
             "mean_mae": mean_mae(result),
             "beats_floor_count": beats_floor_count(result),
-            "n_aspects": NUM_ASPECTS,
+            "n_questions": NUM_QUESTIONS,
             "shuffle_mean_abs_shift": metrics.nanmean([s["mean_abs_shift"] for s in shuffle.values()]),
         }
         if _usable(result):
             calibration[stage] = {
-                aid: {"coverage": m["coverage"], "mean_width": m["mean_width"]}
-                for aid, m in result["metrics"].items() if "coverage" in m
+                qid: {k: m[k] for k in ("confidence_error_spearman", "insufficient_rate")}
+                for qid, m in result["metrics"].items() if "insufficient_rate" in m
             }
     candidates = candidates or {candidate: eval_by_stage}
     return {
         "git_sha": git_sha,
         "candidate": candidate,
         "model": model,
+        "config": config,
         "winner": pick_winner(candidates),
-        "candidates": {slug: candidate_score(by_stage) for slug, by_stage in sorted(candidates.items())},
+        "candidates": {name: candidate_score(by_stage) for name, by_stage in sorted(candidates.items())},
         "quality": quality,
         "calibration": {stage: c for stage, c in calibration.items() if c},
-        "calibration_thresholds": calibration_params,
+        "calibration_params": calibration_params,
         "deployability": {
             "onnx_fp32_bytes": onnx_sizes.get("fp32"),
             "onnx_quantized_bytes": onnx_sizes.get("quantized"),
@@ -97,7 +100,7 @@ def assemble_report(candidate, model, git_sha, eval_by_stage, calibration_params
             "loads_in_browser": None,
         },
         "drift_jevbench": {stage: (eval_by_stage.get(stage) or {}).get("jevbench")
-                           for stage in ("headtrained", "finetuned")},
+                           for stage in ("zeroshot", "finetuned")},
         "limitations": LIMITATIONS,
     }
 
@@ -113,10 +116,10 @@ def stage_rows(report):
             "label": STAGE_LABELS[stage],
             "mean_mae": q.get("mean_mae", math.nan),
             "beats_floor_count": q.get("beats_floor_count"),
-            "n_aspects": q.get("n_aspects"),
+            "n_questions": q.get("n_questions"),
             "shuffle_mean_abs_shift": q.get("shuffle_mean_abs_shift", math.nan),
-            "mean_coverage": metrics.nanmean([m["coverage"] for m in cal.values()]),
-            "mean_width": metrics.nanmean([m["mean_width"] for m in cal.values()]),
+            "mean_confidence_error_spearman": metrics.nanmean([m["confidence_error_spearman"] for m in cal.values()]),
+            "mean_insufficient_rate": metrics.nanmean([m["insufficient_rate"] for m in cal.values()]),
         })
     return rows
 
@@ -135,6 +138,7 @@ def render_markdown(report):
     rows = stage_rows(report)
     deploy = report.get("deployability", {})
     drift = report.get("drift_jevbench", {})
+    params = report.get("calibration_params") or {}
     lines = [
         f"# JobFit benchmark report -- {report['candidate']}",
         "",
@@ -142,11 +146,16 @@ def render_markdown(report):
         f"- Git SHA: `{report['git_sha']}`",
         f"- Winner across candidates: `{report.get('winner')}`",
         "",
+        "## Settings",
+        "",
+        *[f"- {stage}: " + ", ".join(f"{k}={v}" for k, v in args.items())
+          for stage, args in (report.get("config") or {}).items()],
+        "",
         "## Candidates (mean MAE, most advanced stage)",
         "",
         "| Candidate | Mean MAE |",
         "|---|---|",
-        *[f"| {slug} | {fmt(score)} |" for slug, score in report.get("candidates", {}).items()],
+        *[f"| {name} | {fmt(score)} |" for name, score in report.get("candidates", {}).items()],
         "",
         "## Quality (`test`)",
         "",
@@ -154,20 +163,26 @@ def render_markdown(report):
         "|---|---|---|---|",
     ]
     for r in rows:
-        beats = "n/a" if r["beats_floor_count"] is None else f"{r['beats_floor_count']}/{r['n_aspects']}"
+        beats = "n/a" if r["beats_floor_count"] is None else f"{r['beats_floor_count']}/{r['n_questions']}"
         lines.append(f"| {r['label']} | {fmt(r['mean_mae'])} | {beats} | {fmt(r['shuffle_mean_abs_shift'])} |")
     lines += [
         "",
         "Shuffled-pair shift: mean |prediction change| when each test CV is paired with an "
-        "unrelated JD; near 0 means the model ignores the JD. Per-aspect numbers and the "
+        "unrelated JD; near 0 means the model ignores the JD. Per-question numbers and the "
         "keyword-overlap baseline are in the per-stage `eval/*.json`.",
         "",
-        "## Calibration (target coverage 0.90)",
+        "## Calibration",
         "",
-        "| Stage | Mean coverage | Mean interval width |",
+        f"- Shipped (fit on the quantized model): temperature {fmt(params.get('temperature'))}, "
+        f"confidence threshold {fmt(params.get('confidence_threshold'))}",
+        "",
+        "| Stage | Spearman(confidence, abs. error) | Insufficient-data rate |",
         "|---|---|---|",
-        *[f"| {r['label']} | {fmt(r['mean_coverage'])} | {fmt(r['mean_width'])} |"
+        *[f"| {r['label']} | {fmt(r['mean_confidence_error_spearman'])} | {fmt(r['mean_insufficient_rate'])} |"
           for r in rows if r["stage"] in ("calibrated", "quantized")],
+        "",
+        "Means over questions. The Spearman correlation should be clearly negative: the "
+        "more confident an answer, the smaller its error.",
         "",
         "## Deployability",
         "",
@@ -178,12 +193,12 @@ def render_markdown(report):
         "",
         f"- Cold load: {_with_unit(deploy.get('cold_load_time_s'), 1, 's', 1)}",
         f"- Per-inference latency: WebGPU {_with_unit(deploy.get('webgpu_latency_s'), 1, 's', 2)} "
-        f"(budget < 5 s), WASM {_with_unit(deploy.get('wasm_latency_s'), 1, 's', 2)} (budget < 30 s)",
+        f"(budget < 6 s), WASM {_with_unit(deploy.get('wasm_latency_s'), 1, 's', 2)} (budget < 40 s)",
         f"- Loads in a browser: {fmt(deploy.get('loads_in_browser'))}",
         "",
         "## Drift (JevBench, informational)",
         "",
-        f"- Base weights: {fmt(drift.get('headtrained'))}",
+        f"- Base weights: {fmt(drift.get('zeroshot'))}",
         f"- Post-finetune: {fmt(drift.get('finetuned'))}",
         "",
         "## Limitations",

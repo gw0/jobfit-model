@@ -1,5 +1,6 @@
 """Unit tests for common.py. torch-dependent tests skip when torch is absent (CI)."""
 
+import argparse
 import math
 import sys
 import types
@@ -13,18 +14,18 @@ import common
 def test_build_targets_joins_pairwise_and_single_doc_labels():
     pairs = [{"cv": "cvs/a.md", "job": "jobs/acme/1.md"}]
     labels = (
-        {"cvs/a.md": {"clarity_score": 0.8, "clarity_confidence": 0.9,
-                      "llm_generated_score": 0.1, "llm_generated_confidence": 0.7}},
-        {"jobs/acme/1.md": {"clarity_score": 0.6, "clarity_confidence": 0.5,
-                            "llm_generated_score": 0.2, "llm_generated_confidence": 0.4}},
+        {"cvs/a.md": {"cv_clarity_structure_quality_score": 0.8, "cv_clarity_structure_quality_confidence": 0.9,
+                      "cv_likely_llm_generated_score": 0.1, "cv_likely_llm_generated_confidence": 0.7}},
+        {"jobs/acme/1.md": {"job_post_clarity_structure_quality_score": 0.6, "job_post_clarity_structure_quality_confidence": 0.5,
+                            "job_post_likely_llm_generated_score": 0.2, "job_post_likely_llm_generated_confidence": 0.4}},
         {("cvs/a.md", "jobs/acme/1.md"): {"skills_match_score": 0.7, "skills_match_confidence": 0.9,
                                           "overall_fit_score_score": None}},
     )
     targets, confidences = common.build_targets(pairs, labels)
-    assert targets.shape == confidences.shape == (1, common.NUM_ASPECTS)
+    assert targets.shape == confidences.shape == (1, common.NUM_QUESTIONS)
 
     def at(aid):
-        j = common.ASPECT_IDS.index(aid)
+        j = common.QUESTION_IDS.index(aid)
         return targets[0, j], confidences[0, j]
 
     assert at("skills_match") == (0.7, 0.9)
@@ -34,19 +35,19 @@ def test_build_targets_joins_pairwise_and_single_doc_labels():
 
 
 def test_build_targets_empty_and_unlabeled():
-    assert common.build_targets([], ({}, {}, {}))[0].shape == (0, common.NUM_ASPECTS)
+    assert common.build_targets([], ({}, {}, {}))[0].shape == (0, common.NUM_QUESTIONS)
     targets, confidences = common.build_targets([{"cv": "cvs/x.md", "job": "jobs/y/1.md"}], ({}, {}, {}))
     assert np.isnan(targets).all() and np.isnan(confidences).all()
 
 
 def test_json_roundtrip_writes_null_and_restores_nan(tmp_path):
     path = tmp_path / "out.json"
-    common.write_json(path, {"aspect": {"delta": float("nan"), "list": [1.0, float("nan"), None]}})
+    common.write_json(path, {"question": {"temperature": float("nan"), "list": [1.0, float("nan"), None]}})
     assert "NaN" not in path.read_text() and "null" in path.read_text()
     result = common.read_json(path)
-    assert math.isnan(result["aspect"]["delta"])
-    assert result["aspect"]["list"][0] == 1.0
-    assert all(math.isnan(v) for v in result["aspect"]["list"][1:])
+    assert math.isnan(result["question"]["temperature"])
+    assert result["question"]["list"][0] == 1.0
+    assert all(math.isnan(v) for v in result["question"]["list"][1:])
 
 
 def test_model_slug():
@@ -69,7 +70,37 @@ def test_stage_span_without_collector_is_a_passthrough(monkeypatch):
             raise ValueError("boom")
 
 
+# --- parse_args / candidate ------------------------------------------------------------
+
+def _parse(tmp_path, *argv, stage=None):
+    parser = argparse.ArgumentParser()
+    common.add_common_args(parser)
+    parser.add_argument("--lr", type=float, default=1e-4)
+    return common.parse_args(parser, stage, ["--runs-dir", str(tmp_path), *argv])
+
+
+def test_parse_args_candidate_defaults_to_the_model_slug(tmp_path):
+    args = _parse(tmp_path)
+    assert args.candidate == "qwen3-0.6b" and args.run_dir == tmp_path / "qwen3-0.6b"
+    args = _parse(tmp_path, "--candidate", "qwen3-0.6b-lr3e-4", "--lr", "3e-4")
+    assert args.run_dir == tmp_path / "qwen3-0.6b-lr3e-4"
+    assert not (args.run_dir / "config.json").exists()  # only stages that build the candidate record it
+
+
+def test_parse_args_merges_each_stage_into_config_json(tmp_path):
+    _parse(tmp_path, "--run-group", "wf-1", stage="prepare")
+    _parse(tmp_path, "--lr", "3e-4", stage="finetune")
+    config = common.read_json(tmp_path / "qwen3-0.6b" / "config.json")
+    assert set(config) == {"prepare", "finetune"} and config["finetune"]["lr"] == 3e-4
+    assert config["prepare"]["model"] == "Qwen/Qwen3-0.6B"
+    assert "runs_dir" not in config["prepare"] and "run_group" not in config["prepare"]
+
+
 # --- mlflow_run parent lookup ------------------------------------------------------------
+
+def _args(candidate="qwen3-0.6b", run_group=None):
+    return types.SimpleNamespace(model="Qwen/Qwen3-0.6B", candidate=candidate, run_group=run_group)
+
 
 class _FakeMlflow(types.SimpleNamespace):
     """Records start_run calls; search_runs finds whatever parent `create_run` made."""
@@ -115,10 +146,10 @@ class _NullContext:
 def test_mlflow_run_nests_every_stage_under_one_parent_per_group(monkeypatch):
     fake = _FakeMlflow()
     monkeypatch.setitem(sys.modules, "mlflow", fake)
-    for stage in ("prepare", "headtrain"):
-        with common.mlflow_run(stage, "Qwen/Qwen3-0.6B", run_group="wf-1"):
+    for stage in ("prepare", "finetune"):
+        with common.mlflow_run(stage, _args(run_group="wf-1")):
             pass
-    with common.mlflow_run("prepare", "Qwen/Qwen3-0.6B", run_group="wf-2"):
+    with common.mlflow_run("prepare", _args(run_group="wf-2")):
         pass
 
     assert [c["run_group"] for c in fake.created] == ["wf-1", "wf-2"]
@@ -130,88 +161,75 @@ def test_mlflow_run_nests_every_stage_under_one_parent_per_group(monkeypatch):
 def test_mlflow_run_without_group_is_top_level(monkeypatch):
     fake = _FakeMlflow()
     monkeypatch.setitem(sys.modules, "mlflow", fake)
-    with common.mlflow_run("calibrate", "Qwen/Qwen3-0.6B", tags={"extra": "x"}):
+    with common.mlflow_run("calibrate", _args(candidate="qwen3-0.6b-r16"), tags={"extra": "x"}):
         pass
     assert fake.created == []
     (call,) = fake.started
-    assert call["run_name"] == "calibrate-qwen3-0.6b" and call["tags"]["extra"] == "x"
+    assert call["run_name"] == "calibrate-qwen3-0.6b-r16" and call["tags"]["extra"] == "x"
+    assert call["tags"]["candidate"] == "qwen3-0.6b-r16" and call["tags"]["model"] == "Qwen/Qwen3-0.6B"
+
+
+def test_label_weights_mask_missing_and_below_floor():
+    targets = np.array([[0.5, np.nan, 0.5, 0.5]])
+    confidences = np.array([[0.9, 0.9, 0.1, np.nan]])
+    assert common.usable(targets, confidences, 0.3).tolist() == [[True, False, False, False]]
+    assert common.label_weights(targets, confidences, 0.3).tolist() == [[0.9, 0.0, 0.0, 0.0]]
+
+
+def test_answer_targets_two_hot_on_the_level_scale():
+    targets = np.full((1, common.NUM_QUESTIONS), np.nan)
+    targets[0, 0] = 0.3  # 5 levels: index 1.2
+    dists = common.answer_targets(targets)
+    assert dists.shape == (1, common.NUM_QUESTIONS, 10)
+    assert np.allclose(dists[0, 0, :3], [0.0, 0.8, 0.2]) and (dists[0, 1:] == 0).all()
+
+
+def test_read_scores_normalizes_and_applies_temperature():
+    logits = np.full((1, common.NUM_QUESTIONS, 10), -1e9)
+    logits[0, :, 4] = 0.0  # all mass on the top level of every 5-level question
+    scores, confidences = common.read_scores(logits)
+    assert np.allclose(scores, 1.0) and np.allclose(confidences, 1.0)
+    flat = np.zeros((1, common.NUM_QUESTIONS, 10))
+    flat[0, :, 4] = 1.0
+    sharp, _ = common.read_scores(flat, temperature=0.01)
+    soft, _ = common.read_scores(flat, temperature=100.0)
+    assert np.allclose(sharp, 1.0) and np.allclose(soft, 0.5, atol=0.01)
+
+
+def test_temperature_defaults_to_one():
+    assert common.temperature(None) == 1.0
+    assert common.temperature({"temperature": math.nan}) == 1.0
+    assert common.temperature({"temperature": 2.0}) == 2.0
 
 
 # --- torch ---------------------------------------------------------------------------------
 
-def _scalar_pinball_reference(preds, targets, confidences, floor):
-    """The original per-element loop the vectorized loss replaced."""
-    total = weight_sum = 0.0
-    for i in range(len(preds)):
-        for j in range(len(preds[i])):
-            t, c = targets[i][j], confidences[i][j]
-            if math.isnan(t) or math.isnan(c) or c < floor:
-                continue
-            for k, q in enumerate(common.QUANTILES):
-                diff = t - preds[i][j][k]
-                total += c * max(q * diff, (q - 1) * diff)
-            weight_sum += c * len(common.QUANTILES)
-    return total / weight_sum if weight_sum else 0.0
-
-
-def test_pinball_loss_matches_scalar_reference():
+def test_state_dict_hash_changes_with_any_weight():
     torch = pytest.importorskip("torch")
-    rng = np.random.default_rng(0)
-    preds = rng.normal(0.5, 0.3, size=(5, common.NUM_ASPECTS, 3))
-    targets = rng.uniform(0, 1, size=(5, common.NUM_ASPECTS))
-    confidences = rng.uniform(0, 1, size=(5, common.NUM_ASPECTS))
-    targets[0, :4] = np.nan
-    confidences[1, 2] = np.nan
-    expected = _scalar_pinball_reference(preds.tolist(), targets.tolist(), confidences.tolist(), 0.3)
-    loss = common.pinball_loss(torch.tensor(preds, requires_grad=True), torch.tensor(targets),
-                               torch.tensor(confidences), 0.3)
-    assert math.isclose(loss.item(), expected, rel_tol=1e-9)
-    loss.backward()  # finite, differentiable despite NaN targets
-
-
-def test_pinball_loss_all_masked_is_zero():
-    torch = pytest.importorskip("torch")
-    preds = torch.zeros(2, common.NUM_ASPECTS, 3, requires_grad=True)
-    loss = common.pinball_loss(preds, torch.full((2, common.NUM_ASPECTS), 0.5),
-                               torch.zeros(2, common.NUM_ASPECTS), 0.3)
-    assert loss.item() == 0.0
-
-
-class _TinyModel:
-    base_model_prefix = "backbone"
-
-    def __init__(self, torch):
-        self.backbone = torch.nn.Linear(2, 2)
-        self.score = torch.nn.Linear(2, 1)
-
-    def named_parameters(self):
-        yield from (("backbone." + n, p) for n, p in self.backbone.named_parameters())
-        yield from (("score." + n, p) for n, p in self.score.named_parameters())
-
-
-def test_freeze_backbone_and_hash():
-    torch = pytest.importorskip("torch")
-    model = _TinyModel(torch)
-    common.freeze_backbone(model)
-    assert not any(p.requires_grad for p in model.backbone.parameters())
-    assert all(p.requires_grad for p in model.score.parameters())
-
-    h = common.backbone_state_dict_hash(model)
+    model = torch.nn.Linear(2, 2)
+    h = common.state_dict_hash(model)
+    assert common.state_dict_hash(model) == h
     with torch.no_grad():
-        model.score.weight += 1
-    assert common.backbone_state_dict_hash(model) == h
-    with torch.no_grad():
-        model.backbone.weight += 1
-    assert common.backbone_state_dict_hash(model) != h
+        model.bias += 1
+    assert common.state_dict_hash(model) != h
 
 
-def test_predict_quantiles_batched_sorts_crossed_quantiles():
+def test_predict_answer_logits_batches_torch_and_onnx_sessions_alike():
     torch = pytest.importorskip("torch")
-    logits = torch.arange(common.NUM_LABELS, 0, -1, dtype=torch.float32).repeat(3, 1)  # every triple descending
+    n = 3
+    cache = {"pairs": [{}] * n, "input_ids": torch.arange(n * 4).reshape(n, 4),
+             "segment_ids": torch.zeros(n, 4, dtype=torch.long), "answer_positions": torch.zeros(n, 2, dtype=torch.long),
+             "candidate_ids": torch.zeros(2, 10, dtype=torch.long)}
 
-    def model(input_ids, attention_mask):
-        return types.SimpleNamespace(logits=logits[: len(input_ids)])
+    class Model(torch.nn.Module):
+        def forward(self, input_ids, segment_ids, answer_positions, candidate_ids):
+            return input_ids[:, :1, None].float().expand(-1, 2, 10)
 
-    preds = common.predict_quantiles_batched(model, torch.zeros(3, 4), torch.ones(3, 4), batch_size=2)
-    assert preds.shape == (3, common.NUM_ASPECTS, 3)
-    assert (np.diff(preds, axis=-1) >= 0).all()
+    class Session:
+        def run(self, names, feeds):
+            assert names == ["answer_logits"] and set(feeds) == {*common.MODEL_INPUTS, "candidate_ids"}
+            return [np.broadcast_to(feeds["input_ids"][:, :1, None], (len(feeds["input_ids"]), 2, 10)).astype(float)]
+
+    for model in (Model(), Session()):
+        logits = common.predict_answer_logits(model, cache, batch_size=2)
+        assert logits.shape == (n, 2, 10) and logits[:, 0, 0].tolist() == [0, 4, 8]

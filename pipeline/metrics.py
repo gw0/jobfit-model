@@ -1,8 +1,9 @@
-"""Evaluation and calibration statistics over numpy arrays: masking, per-aspect
-MAE/Spearman, conformal calibration and coverage, bootstrap CIs, and the two
-non-learned baselines. No model or file I/O.
+"""Evaluation and calibration statistics over numpy arrays: masking, per-question
+MAE/Spearman, calibration (temperature + confidence threshold) and confidence-vs-error,
+bootstrap CIs, and the two non-learned baselines. No model or file I/O.
 
-Shapes: preds_q (N, NUM_ASPECTS, len(QUANTILES)); targets/confidences (N, NUM_ASPECTS).
+Shapes: scores/targets/confidences (N, NUM_QUESTIONS), scores and targets on the labels'
+[0,1] scale; answer_logits (N, NUM_QUESTIONS, MAX_CANDIDATES).
 """
 
 import math
@@ -11,21 +12,23 @@ import warnings
 import numpy as np
 from scipy import stats
 
-from common import ASPECT_IDS, HIGH, LOW, MID
+import common
+import jev
+from common import QUESTION_IDS, usable
 
-COVERAGE = 0.90
-WIDTH_PERCENTILE = 90
+INSUFFICIENT_PERCENTILE = 10  # the least-confident 10% of calib answers read "insufficient data"
+CONFIDENCE_BINS = 5
 
 
 def masked_columns(preds, targets, confidences, confidence_floor):
-    """Per aspect: (aspect_id, preds[rows, j], targets[rows, j], rows), where `rows`
+    """Per question: (question_id, preds[rows, j], targets[rows, j], rows), where `rows`
     selects the examples whose target is present and at/above the confidence floor --
-    the same masking the training loss applies. `preds` may be (N, A) or (N, A, Q)."""
+    the same masking the training loss applies."""
     preds, targets = np.asarray(preds, dtype=float), np.asarray(targets, dtype=float)
-    mask = ~np.isnan(targets) & (np.asarray(confidences, dtype=float) >= confidence_floor)
-    for j, aid in enumerate(ASPECT_IDS):
+    mask = usable(targets, confidences, confidence_floor)
+    for j, qid in enumerate(QUESTION_IDS):
         rows = mask[:, j]
-        yield aid, preds[rows, j], targets[rows, j], rows
+        yield qid, preds[rows, j], targets[rows, j], rows
 
 
 def mae(preds, targets):
@@ -45,72 +48,72 @@ def nanmean(values):
     return float(np.mean(values[~np.isnan(values)])) if (~np.isnan(values)).any() else math.nan
 
 
-def per_aspect_mae(preds, targets, confidences, confidence_floor):
-    """{aspect_id: MAE}; for (N, A, Q) preds the mid quantile is scored."""
-    preds = np.asarray(preds, dtype=float)
-    if preds.ndim == 3:
-        preds = preds[..., MID]
-    return {aid: mae(p, t) for aid, p, t, _ in masked_columns(preds, targets, confidences, confidence_floor)}
+def per_question_mae(scores, targets, confidences, confidence_floor):
+    """{question_id: MAE}."""
+    return {qid: mae(p, t) for qid, p, t, _ in masked_columns(scores, targets, confidences, confidence_floor)}
 
 
-def mean_mae(preds_q, targets, confidences, confidence_floor):
-    """Mean over aspects of the per-aspect mid-quantile MAE (aspects with no labels skipped)."""
-    return nanmean(list(per_aspect_mae(preds_q, targets, confidences, confidence_floor).values()))
+def mean_mae(scores, targets, confidences, confidence_floor):
+    """Mean over questions of the per-question MAE (questions with no labels skipped)."""
+    return nanmean(list(per_question_mae(scores, targets, confidences, confidence_floor).values()))
 
 
-def compute_metrics(preds_q, targets, confidences, confidence_floor):
-    """{aspect_id: {"n", "mae", "spearman_rho"}} on the mid quantile."""
-    preds_mid = np.asarray(preds_q, dtype=float)[..., MID]
+def compute_metrics(scores, targets, confidences, confidence_floor):
+    """{question_id: {"n", "mae", "spearman_rho"}}."""
     return {
-        aid: {"n": len(t), "mae": mae(p, t), "spearman_rho": spearman(p, t)}
-        for aid, p, t, _ in masked_columns(preds_mid, targets, confidences, confidence_floor)
+        qid: {"n": len(t), "mae": mae(p, t), "spearman_rho": spearman(p, t)}
+        for qid, p, t, _ in masked_columns(scores, targets, confidences, confidence_floor)
     }
 
 
-# --- conformal calibration --------------------------------------------------------------
+# --- calibration ----------------------------------------------------------------------------
 
-def conformal_delta(pred_low, pred_high, target, coverage=COVERAGE):
-    """Split-conformal (CQR) adjustment: widening [low, high] by delta on both sides
-    covers `coverage` of held-out targets. NaN with no examples."""
-    n = len(target)
-    if n == 0:
-        return math.nan
-    scores = np.sort(np.maximum(pred_low - target, target - pred_high))
-    return float(scores[min(n - 1, max(0, math.ceil((n + 1) * coverage) - 1))])
-
-
-def width_threshold(widths, percentile=WIDTH_PERCENTILE):
-    """Nearest-rank percentile of calibrated interval widths: wider predictions read
+def confidence_threshold(confidences, percentile=INSUFFICIENT_PERCENTILE):
+    """Nearest-rank percentile of answer confidences: less confident answers read
     "insufficient data" in the UI."""
-    if len(widths) == 0:
+    confidences = np.sort(np.asarray(confidences, dtype=float))
+    if len(confidences) == 0:
         return math.nan
-    return float(np.sort(widths)[min(len(widths) - 1, max(0, math.ceil(percentile / 100 * len(widths)) - 1))])
+    return float(confidences[min(len(confidences) - 1, max(0, math.ceil(percentile / 100 * len(confidences)) - 1))])
 
 
-def fit_calibration(preds_q, targets, confidences, confidence_floor, coverage=COVERAGE):
-    """{aspect_id: {"delta", "insufficient_data_threshold"}}, NaN for aspects with no
-    usable calibration examples."""
-    params = {}
-    for aid, p, t, _ in masked_columns(preds_q, targets, confidences, confidence_floor):
-        delta = conformal_delta(p[:, LOW], p[:, HIGH], t, coverage)
-        widths = p[:, HIGH] - p[:, LOW] + 2 * delta
-        params[aid] = {"delta": delta, "insufficient_data_threshold": width_threshold(widths)}
-    return params
+def fit_calibration(answer_logits, targets, confidences, confidence_floor):
+    """{"temperature", "confidence_threshold"}, each pooled over every question: one
+    model-level temperature (jev.fit_temperature against the two-hot targets), then the
+    threshold over the temperature-scaled confidences of the labeled answers. NaN
+    where there is nothing to fit on."""
+    answer_logits = np.asarray(answer_logits, dtype=float)
+    dists = common.answer_targets(targets)
+    weights = common.label_weights(targets, confidences, confidence_floor)
+    counts = [common.num_levels(qid) for qid in QUESTION_IDS]
+    temperature = jev.fit_temperature([answer_logits[:, j, :k] for j, k in enumerate(counts)],
+                                      [dists[:, j, :k] for j, k in enumerate(counts)],
+                                      [weights[:, j] for j in range(len(counts))])
+    if math.isnan(temperature):
+        return {"temperature": math.nan, "confidence_threshold": math.nan}
+    _, answer_confidences = common.read_scores(answer_logits, temperature)
+    return {"temperature": temperature, "confidence_threshold": confidence_threshold(answer_confidences[weights > 0])}
 
 
-def compute_coverage(preds_q, targets, confidences, calibration, confidence_floor):
-    """{aspect_id: {"coverage", "mean_width"}} of the calibrated intervals, applying a
-    fixed calibration fit -- never re-fitting it here."""
+def confidence_error(scores, answer_confidences, targets, confidences, confidence_floor, threshold):
+    """{question_id: {"confidence_error_spearman", "confidence_error_bins",
+    "insufficient_rate"}}: Spearman between answer confidence and |score - target|
+    (should be clearly negative), the mean |error| per equal-width confidence bin, and
+    the share of answers below `threshold` -- all under a fixed calibration, never
+    re-fit here."""
+    edges = np.linspace(0.0, 1.0, CONFIDENCE_BINS + 1)
     result = {}
-    for aid, p, t, _ in masked_columns(preds_q, targets, confidences, confidence_floor):
-        delta = calibration.get(aid, {}).get("delta", math.nan)
-        if math.isnan(delta) or len(t) == 0:
-            result[aid] = {"coverage": math.nan, "mean_width": math.nan}
-            continue
-        low, high = p[:, LOW] - delta, p[:, HIGH] + delta
-        result[aid] = {
-            "coverage": float(np.mean((low <= t) & (t <= high))),
-            "mean_width": float(np.mean(high - low)),
+    for qid, p, t, rows in masked_columns(scores, targets, confidences, confidence_floor):
+        conf, err = np.asarray(answer_confidences, dtype=float)[rows, QUESTION_IDS.index(qid)], np.abs(p - t)
+        bins = np.clip(np.digitize(conf, edges[1:-1]), 0, CONFIDENCE_BINS - 1)
+        result[qid] = {
+            "confidence_error_spearman": spearman(conf, err),
+            "confidence_error_bins": [
+                {"confidence_lo": float(edges[b]), "confidence_hi": float(edges[b + 1]),
+                 "n": int((bins == b).sum()), "mean_abs_error": mae(p[bins == b], t[bins == b])}
+                for b in range(CONFIDENCE_BINS)
+            ],
+            "insufficient_rate": (float(np.mean(~(conf >= threshold))) if len(conf) else math.nan),
         }
     return result
 
@@ -131,23 +134,22 @@ def bootstrap_ci(values_by_group, n_resamples=1000, seed=42, level=0.90):
     return float(lo), float(hi)
 
 
-def bootstrap_mae_ci(preds_q, targets, confidences, confidence_floor, group_ids, **kwargs):
-    """{aspect_id: {"mae_ci_lo", "mae_ci_hi"}}: per-aspect mid-quantile MAE CIs over
-    groups (CV identity), on the same masked examples as every other metric."""
-    preds_mid = np.asarray(preds_q, dtype=float)[..., MID]
+def bootstrap_mae_ci(scores, targets, confidences, confidence_floor, group_ids, **kwargs):
+    """{question_id: {"mae_ci_lo", "mae_ci_hi"}}: per-question MAE CIs over groups (CV
+    identity), on the same masked examples as every other metric."""
     group_ids = np.asarray(group_ids)
     result = {}
-    for aid, p, t, rows in masked_columns(preds_mid, targets, confidences, confidence_floor):
+    for qid, p, t, rows in masked_columns(scores, targets, confidences, confidence_floor):
         errors, groups = np.abs(p - t), group_ids[rows]
         lo, hi = bootstrap_ci([errors[groups == g] for g in np.unique(groups)], **kwargs)
-        result[aid] = {"mae_ci_lo": lo, "mae_ci_hi": hi}
+        result[qid] = {"mae_ci_lo": lo, "mae_ci_hi": hi}
     return result
 
 
 # --- non-learned baselines (specs §4) ----------------------------------------------------
 
 def train_mean_preds(train_targets, train_confidences, confidence_floor, n):
-    """(n, A) predictions of the per-aspect mean train target -- the trivial floor."""
+    """(n, Q) predictions of the per-question mean train target -- the trivial floor."""
     means = [np.mean(t) if len(t) else math.nan
              for _, _, t, _ in masked_columns(train_targets, train_targets, train_confidences, confidence_floor)]
     return np.tile(np.array(means, dtype=float), (n, 1))
@@ -162,7 +164,7 @@ def keyword_overlap(cv_text, jd_text):
 
 
 def keyword_overlap_preds(train_overlaps, train_targets, train_confidences, confidence_floor, overlaps):
-    """(n, A) predictions of a per-aspect linear fit overlap -> score, fit on train."""
+    """(n, Q) predictions of a per-question linear fit overlap -> score, fit on train."""
     train_overlaps, overlaps = np.asarray(train_overlaps, dtype=float), np.asarray(overlaps, dtype=float)
     columns = []
     for _, _, t, rows in masked_columns(train_targets, train_targets, train_confidences, confidence_floor):

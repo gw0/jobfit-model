@@ -1,13 +1,8 @@
-"""Unit tests for prepare.py's pure logic, with a whitespace stand-in tokenizer."""
+"""Unit tests for prepare.py's pure logic (encoding itself is tested in test_jev.py)."""
 
 import pytest
 
-from prepare import LeakageError, assert_leakage_free, derange_pairs, encode_pair
-
-
-class FakeTokenizer:
-    def encode(self, text, add_special_tokens=False):
-        return text.split()
+from prepare import LeakageError, assert_leakage_free, derange_pairs
 
 
 def test_leakage_check():
@@ -26,24 +21,6 @@ def test_leakage_check():
             "train": [{"cv": "cvs/a.md", "job": "jobs/acme/1.md"}],
             "test": [{"cv": "cvs/b.md", "job": "jobs/acme/2.md"}],
         })
-
-
-def test_encode_pair_short_inputs_jd_last_and_padded():
-    ids, mask, cv_trunc, jd_trunc = encode_pair(
-        FakeTokenizer(), "cv one two", "jd three four", cv_budget=5, jd_budget=5, max_length=10)
-    assert not cv_trunc and not jd_trunc
-    assert ids == ["cv", "one", "two", "jd", "three", "four"] + [0] * 4
-    assert mask == [1] * 6 + [0] * 4
-
-
-def test_encode_pair_truncates_each_side_then_caps():
-    cv = " ".join(f"cv{i}" for i in range(10))
-    jd = " ".join(f"jd{i}" for i in range(10))
-    ids, mask, cv_trunc, jd_trunc = encode_pair(FakeTokenizer(), cv, jd, cv_budget=3, jd_budget=4, max_length=20)
-    assert cv_trunc and jd_trunc
-    assert ids[:7] == ["cv0", "cv1", "cv2", "jd0", "jd1", "jd2", "jd3"] and sum(mask) == 7
-    ids, mask, _, _ = encode_pair(FakeTokenizer(), cv, jd, cv_budget=8, jd_budget=8, max_length=12)
-    assert len(ids) == 12 and sum(mask) == 12
 
 
 def test_derange_pairs_gives_every_cv_a_job_it_is_not_paired_with():

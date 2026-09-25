@@ -2,25 +2,23 @@
 """`prepare` stage (specs §6): verify and materialise the committed splits, never re-split.
 
 Asserts train/test share no CV and no company, fails on any Presidio PII finding, then
-tokenizes each CV/JD pair (each side truncated to 1024 tokens, JD last, padded to
-2048) and caches the tensors. `test` additionally gets a `test_shuffled` cache for the
+encodes each CV/JD pair with every question (jev.encode: CV then JD, each truncated to
+1024 tokens, then the 17 question branches in a 1024-token block, padded to 3072) and
+caches the tensors. `test` additionally gets a `test_shuffled` cache for the
 shuffled-pair control: each test CV paired with a job it is not paired with.
 
 Usage:
     ./pipeline/prepare.py --dataset-dir datasets_smoke --runs-dir runs_smoke
 
-Writes <runs-dir>/<model-slug>/cache/{train,val,calib,test,test_shuffled}.pt.
+Writes <runs-dir>/<candidate>/cache/{train,val,calib,test,test_shuffled}.pt.
 """
 
 import argparse
 import random
 
 import common
+import jev
 from common import corpus
-
-CV_BUDGET = 1024
-JD_BUDGET = 1024
-MAX_LENGTH = 2048
 
 
 class LeakageError(Exception):
@@ -42,22 +40,6 @@ def assert_leakage_free(splits):
         )
 
 
-def encode_pair(tokenizer, cv_text, jd_text, cv_budget=CV_BUDGET, jd_budget=JD_BUDGET,
-                max_length=MAX_LENGTH, pad_token_id=0):
-    """Returns (input_ids, attention_mask, cv_truncated, jd_truncated), padded to
-    `max_length`. Must stay identical to frontend/src/tokenize.mjs."""
-    cv_ids = tokenizer.encode(cv_text, add_special_tokens=False)
-    jd_ids = tokenizer.encode(jd_text, add_special_tokens=False)
-    input_ids = (cv_ids[:cv_budget] + jd_ids[:jd_budget])[:max_length]
-    pad_len = max_length - len(input_ids)
-    return (
-        input_ids + [pad_token_id] * pad_len,
-        [1] * len(input_ids) + [0] * pad_len,
-        len(cv_ids) > cv_budget,
-        len(jd_ids) > jd_budget,
-    )
-
-
 def derange_pairs(pairs, all_job_ids, seed=42):
     """Pairs every CV in `pairs` with a job it is not paired with there. The pool is
     the whole corpus: a split can be a full CV x job cross product, where no in-split
@@ -75,24 +57,28 @@ def derange_pairs(pairs, all_job_ids, seed=42):
     return shuffled
 
 
-def _cache_split(tokenizer, dataset_dir, runs_dir, slug, name, pairs):
+def _cache_split(tokenizer, dataset_dir, run_dir, name, pairs):
     import torch
 
     rows = [
-        encode_pair(tokenizer, (dataset_dir / p["cv"]).read_text(encoding="utf-8"),
-                    corpus.read_job_body(dataset_dir / p["job"]), pad_token_id=tokenizer.pad_token_id)
+        jev.encode(tokenizer, common.jobfit_state((dataset_dir / p["cv"]).read_text(encoding="utf-8"),
+                                           corpus.read_job_body(dataset_dir / p["job"])),
+                   common.QUESTIONS, common.PART_BUDGET, common.QUESTIONS_BUDGET, tokenizer.pad_token_id)
         for p in pairs
     ]
-    path = common.cache_path(runs_dir, slug, name)
+    candidate_ids, candidate_counts = jev.candidate_ids(tokenizer, common.QUESTIONS)
+    path = common.cache_path(run_dir, name)
     path.parent.mkdir(parents=True, exist_ok=True)
     torch.save({
         "pairs": pairs,
-        "input_ids": torch.tensor([r[0] for r in rows], dtype=torch.long),
-        "attention_mask": torch.tensor([r[1] for r in rows], dtype=torch.long),
+        **{key: torch.tensor([r[key] for r in rows], dtype=torch.long) for key in common.MODEL_INPUTS},
+        "candidate_ids": torch.tensor(candidate_ids, dtype=torch.long),
+        "candidate_counts": candidate_counts,
     }, path)
     n = len(pairs)
-    print(f"{name}: {n} pair(s) -> {path} (cv truncated {sum(r[2] for r in rows)}/{n}, "
-          f"jd truncated {sum(r[3] for r in rows)}/{n})")
+    truncated = {title: sum(r["truncated"][title] for r in rows) for title in rows[0]["truncated"]}
+    print(f"{name}: {n} pair(s) -> {path} ("
+          + ", ".join(f"{title} truncated {count}/{n}" for title, count in truncated.items()) + ")")
 
 
 def _pii_scan(dataset_dir):
@@ -104,7 +90,7 @@ def _pii_scan(dataset_dir):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     common.add_common_args(parser)
-    args = parser.parse_args()
+    args = common.parse_args(parser, "prepare")
 
     with common.stage_span("prepare"):
         splits = corpus.load_splits(args.dataset_dir)
@@ -121,14 +107,16 @@ def main():
         print("PII scan passed: no findings")
 
         tokenizer = common.load_tokenizer(args.model)
-        slug = common.model_slug(args.model)
+        questions_len = sum(len(tokenizer.encode(jev.render_question(q), add_special_tokens=False))
+                            for q in common.QUESTIONS.values())
+        print(f"questions block: {questions_len}/{common.QUESTIONS_BUDGET} tokens")
         for name, pairs in splits.items():
             if pairs:
-                _cache_split(tokenizer, args.dataset_dir, args.runs_dir, slug, name, pairs)
+                _cache_split(tokenizer, args.dataset_dir, args.run_dir, name, pairs)
         if splits["test"]:
             all_jobs = [job for jobs in corpus.list_jobs(args.dataset_dir).values() for job in jobs]
             shuffled = derange_pairs(splits["test"], all_jobs, seed=args.seed)
-            _cache_split(tokenizer, args.dataset_dir, args.runs_dir, slug, "test_shuffled", shuffled)
+            _cache_split(tokenizer, args.dataset_dir, args.run_dir, "test_shuffled", shuffled)
 
 
 if __name__ == "__main__":
