@@ -2,7 +2,7 @@
 # down afterward -- no persistent, always-on cluster. Same manifest serves local
 # dev/test and the real run that produces the shipped model.
 #
-# Usage: kind create cluster --name jobfit --config infra/kind-config.yaml
+# Usage: `make cluster-up` (picks a per-checkout --name automatically; see Makefile)
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 nodes:
@@ -16,9 +16,19 @@ nodes:
       # hostPath source for pipeline/workflow.yaml's `dataset` volume -- point this at
       # a real datasets/ (or datasets_smoke/) checkout before `kind create cluster`.
       - hostPath: ./datasets
-        containerPath: /mnt/jobfit-dataset
+        containerPath: /mnt/dataset
       # hostPath source for pipeline/workflow.yaml's `runs` volume -- separate from
       # `dataset` above so pipeline output never gets mixed into the committed corpus
       # checkout. Point this at ./runs (or ./runs_smoke).
       - hostPath: ./runs
-        containerPath: /mnt/jobfit-runs
+        containerPath: /mnt/runs
+      # hostPath source for pipeline/workflow.yaml's `cache` volume -- shared with the
+      # local Docker smoke path's `.cache` mount (Makefile) so downloaded weights are
+      # reused across both.
+      - hostPath: ./.cache
+        containerPath: /mnt/cache
+      # GPU passthrough for `make cluster-up GPU=1` (infra/gpu/setup-node.sh): with the
+      # host's nvidia runtime set to accept volume mounts, this exposes every GPU to the
+      # node. Without that host setup it is an inert empty file, so CPU clusters share it.
+      - hostPath: /dev/null
+        containerPath: /var/run/nvidia-container-devices/all

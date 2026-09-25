@@ -1,0 +1,19 @@
+# hostPath-backed PV for pipeline/workflow.yaml's `cache` volume (mounted /cache by
+# every pipeline stage, HF_HOME=/cache/huggingface in docker/pipeline.Dockerfile) --
+# same reasoning/pattern as mlflow-pv.yaml. Path matches infra/kind-config.yaml's
+# extraMounts containerPath.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: cache
+  labels:
+    app: cache
+spec:
+  capacity:
+    storage: 10Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  hostPath:
+    path: /mnt/cache
+    type: DirectoryOrCreate

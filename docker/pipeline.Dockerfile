@@ -11,7 +11,11 @@ RUN pip install --no-cache-dir -r pipeline/requirements.txt \
 ARG GIT_SHA=unknown
 ENV GIT_SHA=$GIT_SHA
 
+# Mounted at /cache (Makefile, pipeline/workflow.yaml) so downloaded weights survive
+# past this container's lifetime instead of landing in the throwaway default ~/.cache.
+ENV HF_HOME=/cache/huggingface
+
 # data/ provides corpus.py and pii_scrub.py, which pipeline/ imports.
-COPY aspects.json aspects.json
+COPY questions.json questions.json
 COPY data/ data/
 COPY pipeline/ pipeline/

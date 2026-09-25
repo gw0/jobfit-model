@@ -1,0 +1,9 @@
+# NVIDIA device plugin: advertises the node's GPUs as `nvidia.com/gpu`, which
+# pipeline/workflow.yaml's `gpus` parameter requests. Needs infra/gpu/setup-node.sh first.
+#
+# Usage: kubectl apply -k infra/gpu   (`make cluster-up GPU=1` does both)
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - https://raw.githubusercontent.com/NVIDIA/k8s-device-plugin/v0.17.1/deployments/static/nvidia-device-plugin.yml

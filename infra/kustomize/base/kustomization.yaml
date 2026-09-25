@@ -17,6 +17,8 @@ resources:
   - dataset-pvc.yaml
   - runs-pv.yaml
   - runs-pvc.yaml
+  - cache-pv.yaml
+  - cache-pvc.yaml
   - otel-collector-configmap.yaml
   - otel-collector-deployment.yaml
   - otel-collector-service.yaml

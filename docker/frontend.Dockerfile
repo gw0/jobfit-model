@@ -5,8 +5,8 @@ WORKDIR /app
 COPY frontend/package.json frontend/bun.lock ./
 RUN npm install
 COPY frontend/ ./
-# src/infer.ts imports ../../aspects.json, the same file the pipeline reads.
-COPY aspects.json /aspects.json
+# src/App.vue imports ../../questions.json, the same file the pipeline reads.
+COPY questions.json /questions.json
 RUN npm run build
 
 FROM nginx:alpine

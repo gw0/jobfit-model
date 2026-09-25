@@ -1,9 +1,10 @@
-# Argo Workflows DAG (specs §6): prepare -> headtrain -> evaluate -> finetune -> evaluate
+# Argo Workflows DAG (specs §6): prepare -> evaluate (zeroshot) -> finetune -> evaluate
 # -> calibrate -> evaluate -> export -> evaluate -> publish, one shared jobfit-pipeline
 # image. One workflow per candidate; every stage's MLflow run nests under a parent run
 # named after the workflow (--run-group).
 #
-# Usage: argo submit -n jobfit pipeline/workflow.yaml --generate-name jobfit-run-<slug>- -p model=<hf-id>
+# Usage: argo submit -n jobfit pipeline/workflow.yaml --generate-name jobfit-<candidate>- \
+#          -p model=<hf-id> [-p candidate=<name>] [-p gpus=1] [-p lora-rank=16 ...]
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
@@ -17,27 +18,34 @@ spec:
     parameters:
       - name: model
         value: "Qwen/Qwen3-0.6B"
+      # <runs-dir>/<candidate>/; empty means the model slug (pipeline/common.py).
+      - name: candidate
+        value: ""
+      # NVIDIA GPUs per stage pod; 0 runs on CPU. >0 needs `make cluster-up GPU=1`.
+      - name: gpus
+        value: "0"
       - name: lora-rank
         value: "8"
       - name: lora-alpha
         value: "16"
-      - name: lr-headtrain
-        value: "1e-3"
       - name: lr-finetune
         value: "1e-4"
-      - name: epochs-headtrain
-        value: "30"
       - name: epochs-finetune
         value: "5"
 
-  # `dataset` is the committed corpus, mounted read-only; `runs` holds pipeline output.
+  # `dataset` is the committed corpus, mounted read-only; `runs` holds pipeline output;
+  # `cache` holds downloaded model weights (HF_HOME=/cache/huggingface in the image) so
+  # they survive across stages and workflow runs instead of being re-downloaded each time.
   volumes:
     - name: dataset
       persistentVolumeClaim:
-        claimName: jobfit-dataset
+        claimName: dataset
     - name: runs
       persistentVolumeClaim:
-        claimName: jobfit-runs
+        claimName: runs
+    - name: cache
+      persistentVolumeClaim:
+        claimName: cache
 
   templates:
     - name: pipeline
@@ -48,41 +56,24 @@ spec:
             arguments:
               parameters:
                 - name: command
-                  value: >-
-                    ./pipeline/prepare.py
-                    --dataset-dir /data --runs-dir /runs --model {{workflow.parameters.model}} --run-group {{workflow.name}}
+                  value: ./pipeline/prepare.py
 
-          - name: headtrain
+          - name: evaluate-zeroshot
             dependencies: [prepare]
             template: stage
             arguments:
               parameters:
                 - name: command
-                  value: >-
-                    ./pipeline/train.py --stage headtrain
-                    --dataset-dir /data --runs-dir /runs --model {{workflow.parameters.model}} --run-group {{workflow.name}}
-                    --lr {{workflow.parameters.lr-headtrain}}
-                    --epochs {{workflow.parameters.epochs-headtrain}}
-
-          - name: evaluate-headtrained
-            dependencies: [headtrain]
-            template: stage
-            arguments:
-              parameters:
-                - name: command
-                  value: >-
-                    ./pipeline/evaluate.py --stage headtrained
-                    --dataset-dir /data --runs-dir /runs --model {{workflow.parameters.model}} --run-group {{workflow.name}}
+                  value: ./pipeline/evaluate.py --stage zeroshot
 
           - name: finetune
-            dependencies: [evaluate-headtrained]
+            dependencies: [evaluate-zeroshot]
             template: stage
             arguments:
               parameters:
                 - name: command
                   value: >-
-                    ./pipeline/train.py --stage finetune
-                    --dataset-dir /data --runs-dir /runs --model {{workflow.parameters.model}} --run-group {{workflow.name}}
+                    ./pipeline/train.py
                     --lr {{workflow.parameters.lr-finetune}}
                     --epochs {{workflow.parameters.epochs-finetune}}
                     --lora-rank {{workflow.parameters.lora-rank}}
@@ -94,9 +85,7 @@ spec:
             arguments:
               parameters:
                 - name: command
-                  value: >-
-                    ./pipeline/evaluate.py --stage finetuned
-                    --dataset-dir /data --runs-dir /runs --model {{workflow.parameters.model}} --run-group {{workflow.name}}
+                  value: ./pipeline/evaluate.py --stage finetuned
 
           - name: calibrate
             dependencies: [evaluate-finetuned]
@@ -104,9 +93,7 @@ spec:
             arguments:
               parameters:
                 - name: command
-                  value: >-
-                    ./pipeline/calibrate.py
-                    --dataset-dir /data --runs-dir /runs --model {{workflow.parameters.model}} --run-group {{workflow.name}}
+                  value: ./pipeline/calibrate.py
 
           - name: evaluate-calibrated
             dependencies: [calibrate]
@@ -114,9 +101,7 @@ spec:
             arguments:
               parameters:
                 - name: command
-                  value: >-
-                    ./pipeline/evaluate.py --stage calibrated
-                    --dataset-dir /data --runs-dir /runs --model {{workflow.parameters.model}} --run-group {{workflow.name}}
+                  value: ./pipeline/evaluate.py --stage calibrated
 
           - name: export
             dependencies: [evaluate-calibrated]
@@ -124,9 +109,7 @@ spec:
             arguments:
               parameters:
                 - name: command
-                  value: >-
-                    ./pipeline/export.py
-                    --dataset-dir /data --runs-dir /runs --model {{workflow.parameters.model}} --run-group {{workflow.name}}
+                  value: ./pipeline/export.py
 
           - name: evaluate-quantized
             dependencies: [export]
@@ -134,9 +117,7 @@ spec:
             arguments:
               parameters:
                 - name: command
-                  value: >-
-                    ./pipeline/evaluate.py --stage quantized
-                    --dataset-dir /data --runs-dir /runs --model {{workflow.parameters.model}} --run-group {{workflow.name}}
+                  value: ./pipeline/evaluate.py --stage quantized
 
           - name: publish
             dependencies: [evaluate-quantized]
@@ -144,22 +125,33 @@ spec:
             arguments:
               parameters:
                 - name: command
-                  value: >-
-                    ./pipeline/publish.py
-                    --dataset-dir /data --runs-dir /runs --model {{workflow.parameters.model}} --run-group {{workflow.name}}
+                  value: ./pipeline/publish.py
 
     # One shared template, so pods are named <workflow>-stage-<hash>; the task name is in
-    # the workflows.argoproj.io/node-name annotation (see `make cluster-logs`).
+    # the workflows.argoproj.io/node-name annotation (see `make cluster-logs`). It appends
+    # the arguments every stage takes to the task's command.
     - name: stage
       inputs:
         parameters:
           - name: command
+      # gpus=0 requests no GPU (an extended resource at 0 fits any node), so CPU and GPU
+      # runs share this one template.
+      podSpecPatch: |
+        containers:
+          - name: main
+            resources:
+              limits:
+                nvidia.com/gpu: "{{workflow.parameters.gpus}}"
       container:
         image: jobfit-pipeline:latest
         # Loaded into the node by `kind load docker-image`; there is no registry to pull from.
         imagePullPolicy: IfNotPresent
         command: ["bash", "-c"]
-        args: ["{{inputs.parameters.command}}"]
+        args:
+          - >-
+            {{inputs.parameters.command}}
+            --dataset-dir /data --runs-dir /runs --model {{workflow.parameters.model}}
+            --candidate '{{workflow.parameters.candidate}}' --run-group {{workflow.name}}
         env:
           - name: MLFLOW_TRACKING_URI
             value: "http://mlflow.jobfit.svc.cluster.local:5000"
@@ -171,3 +163,5 @@ spec:
             readOnly: true
           - name: runs
             mountPath: /runs
+          - name: cache
+            mountPath: /cache

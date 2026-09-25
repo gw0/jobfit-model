@@ -1,31 +1,43 @@
 # `data/` -- offline dataset-build toolset
 
-One-time scripts (specs §5) that produce the committed corpus `datasets/`
-(`datasets_smoke/` at smoke scale). None of this runs in the Argo pipeline;
+One-time scripts (specs §5) that produce the committed corpora `datasets_smoke/` and
+`datasets_full/`. None of this runs in the Argo pipeline;
 `pipeline/prepare.py` only reads the result.
 
 ## Building a full-scale corpus
 
-`datasets_smoke/` (10 CVs, 10 jobs, 58 pairs) exercises the pipeline logic but is too
-small for meaningful quality or calibration numbers. The full corpus (~100 CVs,
-~500 jobs, ~4k pairs, specs §5) comes from the same scripts pointed at `datasets/`:
+`datasets_smoke/` (10 CVs, 10 jobs, 58 pairs, 4 of them in `test`) exercises the
+pipeline logic but is too small for meaningful quality or calibration numbers.
+`datasets_full/` comes from the same scripts at `SCALE=full` (Makefile):
 
 ```sh
-./data/fetch_jobs/fetch_all.py --out-dir datasets/jobs       # or fetch_<ats>.py per board
-./data/generate_cvs.py --count 100 --out-dir datasets         # needs an authenticated `claude`
-./data/pii_scrub.py datasets/cvs
-./data/build_dataset.py --out-dir datasets                    # 70/10/10/10 needs this scale
-./data/label_dataset.py --out-dir datasets --double-label     # one call does both passes
+make jobs SCALE=full      # fetch_all.py: ~400 posts, at most 10 per company
+make cvs SCALE=full       # generate_cvs.py: 250 CVs over a seeded role/seniority/location/style grid
+make dataset SCALE=full   # build_dataset.py: 20 jobs per CV, half nearest by TF-IDF, half random
+make labels SCALE=full    # label_dataset.py: judge every doc and pair, double-label 300 test pairs
 ```
 
-The labeling step makes one `claude -p` judge call per pair, so its token cost and
-wall-clock time scale with the corpus: the 58-pair smoke corpus takes minutes, ~4k pairs
-takes orders of magnitude longer. `datasets/` is committed once built: it is synthetic
-(specs §10), and losing it would mean paying for labeling again.
+| | CVs | jobs | pairs (train / val / calib / test) |
+|---|---|---|---|
+| smoke | 10 | 10 | 58 (42 / 6 / 6 / 4), every CV x every job of its pool |
+| full | 250 | ~400 | 5,000 (3,500 / 500 / 500 / 500) |
+
+Sampling pairs instead of taking every combination keeps labeling affordable, and
+taking half of each CV's jobs from its nearest matches keeps the fit labels spread over
+the whole scale instead of piling up near "no fit". The ~25 distinct `test` CVs, rather
+than ~1, are what make the bootstrap CIs over CV groups (specs §5) usable.
+
+Labeling makes one `claude -p` judge call per document and per pair: ~5.9k calls at
+full scale, Sonnet for the bulk pass and Opus for the 300-pair double-label QC, roughly
+8-12 hours with `--workers 8`. Every step keeps what already exists and the labeler
+appends each record as its call returns; on the account's usage limit it stops at
+once, so an interrupted step resumes by re-running it after the reset. `datasets_full/` is committed once built:
+it is synthetic apart from the job posts (specs §10), and losing it would mean paying
+for labeling again.
 
 ## Job-post redistribution: ToS review (specs §12, gate before going public)
 
-The curated `jobs/` corpus (`datasets_smoke/jobs/`, and any future `datasets/jobs/`)
+The curated `jobs/` corpus (`datasets_smoke/jobs/`, and `datasets_full/jobs/`)
 consists of individual public job-posting pages fetched from three third-party
 applicant-tracking systems: Greenhouse (`job-boards.greenhouse.io`), Lever
 (`jobs.lever.co`), and Ashby (`jobs.ashbyhq.com`). Findings from a review done ahead
@@ -51,7 +63,7 @@ of this gate (2026-09-23, not a substitute for real legal counsel):
 
 **Decision**: proceed with the current curated `datasets_smoke/jobs/` corpus (10
 posts, non-commercial ML research/demo use, small scale, full attribution retained)
-staying committed. Before any future large-scale (~500 post) `datasets/jobs/` corpus
-or commercial use, get a real legal review per-ATS rather than relying on this
+staying committed. Before publishing the large-scale (~400 post) `datasets_full/jobs/`
+corpus or any commercial use, get a real legal review per-ATS rather than relying on this
 engineering-level pass -- this review is deliberately scoped to what could be checked
 via public robots.txt/ToS pages in the time available, not a certified legal opinion.
