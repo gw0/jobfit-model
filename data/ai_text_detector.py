@@ -1,4 +1,4 @@
-"""AI-text detector for aspects #14/#15 (CV / job post likely LLM-generated), applied
+"""AI-text detector for questions #14/#15 (CV / job post likely LLM-generated), applied
 once per document instead of an LLM judge (specs §5).
 
 desklib/ai-text-detector-v1.01 (DeBERTa-v3-large, MIT), run locally on CPU. Chosen

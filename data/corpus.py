@@ -14,6 +14,13 @@ DEFAULT_DATASET_DIR = REPO_ROOT / "datasets"
 SPLIT_NAMES = ("train", "val", "calib", "test")
 
 
+def load_questions():
+    """questions.json: {question_id: {"type", "name", "scope", "question", "criteria"}},
+    the one rubric shared by the LLM judge and the model."""
+    with open(REPO_ROOT / "questions.json", encoding="utf-8") as f:
+        return json.load(f)
+
+
 def load_jsonl(path):
     path = Path(path)
     if not path.is_file():
