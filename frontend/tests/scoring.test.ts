@@ -1,52 +1,36 @@
 import { describe, expect, it } from "vitest";
-import { downloadTracker, isInsufficientData, toAspectScores } from "../src/scoring";
+import { downloadTracker, isInsufficientData, toResultRows, type JobFitQuestion } from "../src/scoring";
 
-const ASPECTS = [
-  { id: "a", name: "Aspect A" },
-  { id: "b", name: "Aspect B" },
-];
+const QUESTIONS: Record<string, JobFitQuestion> = {
+  a: { type: "score", name: "Question A", scope: "pairwise", question: "A?", criteria: ["none", "some", "all"] },
+  b: { type: "score", name: "Question B", scope: "cv", question: "B?", criteria: ["low", "high"] },
+};
+const score = (value: number, confidence: number) => ({ type: "score" as const, score: value, confidence, probabilities: {} });
 
 describe("isInsufficientData", () => {
-  it("flags an interval wider than the threshold", () => {
-    expect(isInsufficientData(0.1, 0.9, 0.5)).toBe(true);
+  it("flags answers below the threshold only", () => {
+    expect(isInsufficientData(0.3, 0.5)).toBe(true);
+    expect(isInsufficientData(0.5, 0.5)).toBe(false);
+    expect(isInsufficientData(0.9, 0.5)).toBe(false);
   });
 
-  it("accepts an interval within or exactly at the threshold", () => {
-    expect(isInsufficientData(0.4, 0.5, 0.5)).toBe(false);
-    expect(isInsufficientData(0.0, 0.5, 0.5)).toBe(false);
-  });
-
-  it("flags every prediction when no calibrated threshold exists", () => {
-    expect(isInsufficientData(0.4, 0.5, NaN)).toBe(true);
+  it("flags every answer when no calibrated threshold exists", () => {
+    expect(isInsufficientData(0.99, null)).toBe(true);
+    expect(isInsufficientData(0.99, NaN)).toBe(true);
   });
 });
 
-describe("toAspectScores", () => {
-  const calibration = {
-    a: { delta: 0.1, insufficient_data_threshold: 1.0 },
-    b: { delta: 0.0, insufficient_data_threshold: 0.1 },
-  };
-
-  it("widens each interval by its aspect's conformal delta", () => {
-    const [a, b] = toAspectScores([0.2, 0.5, 0.7, 0.4, 0.45, 0.6], ASPECTS, calibration);
-    expect(a).toMatchObject({ id: "a", name: "Aspect A", score: 0.5, insufficientData: false });
-    expect(a.low).toBeCloseTo(0.1);
-    expect(a.high).toBeCloseTo(0.8);
-    expect(b).toMatchObject({ score: 0.45, low: 0.4, high: 0.6, insufficientData: true }); // width 0.2 > 0.1
+describe("toResultRows", () => {
+  it("labels each score with its nearest level and applies the threshold", () => {
+    const rows = toResultRows({ a: score(1.4, 0.8), b: score(0.2, 0.3) }, QUESTIONS,
+      { temperature: 1.2, confidence_threshold: 0.5 });
+    expect(rows[0]).toMatchObject({ id: "a", name: "Question A", score: 1.4, levels: 3, label: "some", insufficientData: false });
+    expect(rows[1]).toMatchObject({ id: "b", levels: 2, label: "low", confidence: 0.3, insufficientData: true });
   });
 
-  it("sorts crossed quantile outputs so low <= score <= high", () => {
-    const [a] = toAspectScores([0.9, 0.3, 0.5, 0, 0, 0], ASPECTS, calibration);
-    expect(a.score).toBe(0.5);
-    expect(a.low).toBeCloseTo(0.2);
-    expect(a.high).toBeCloseTo(1.0);
-  });
-
-  it("reads uncalibrated (null or missing) aspects as insufficient data", () => {
-    const scores = toAspectScores([0.4, 0.5, 0.6, 0.4, 0.5, 0.6], ASPECTS, {
-      a: { delta: null, insufficient_data_threshold: null },
-    });
-    expect(scores.every((s) => s.insufficientData)).toBe(true);
+  it("reads an uncalibrated model as insufficient data", () => {
+    const rows = toResultRows({ a: score(2, 1), b: score(1, 1) }, QUESTIONS, { temperature: null, confidence_threshold: null });
+    expect(rows.every((r) => r.insufficientData)).toBe(true);
   });
 });
 

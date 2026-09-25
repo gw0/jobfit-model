@@ -1,11 +1,15 @@
 <script setup lang="ts">
 import { ref } from "vue";
-import { extractPdfText, loadModel, scoreCvJob } from "./infer";
-import type { AspectScore } from "./scoring";
+import questionsJson from "../../questions.json";
+import { evaluate, extractPdfText, loadModel } from "./infer";
+import { jobfitState } from "./jobfit.mjs";
+import { toResultRows, type JobFitQuestion, type ResultRow } from "./scoring";
+
+const questions = questionsJson as Record<string, JobFitQuestion>;
 
 const cvText = ref("");
 const jdText = ref("");
-const results = ref<AspectScore[] | null>(null);
+const results = ref<ResultRow[] | null>(null);
 const status = ref<"idle" | "loading" | "scoring" | "error">("idle");
 const errorMessage = ref("");
 const download = ref({ loaded: 0, total: 0 });
@@ -23,11 +27,12 @@ async function onSubmit() {
   results.value = null;
   try {
     status.value = "loading";
-    await loadModel((loaded, total) => {
+    const { calibration } = await loadModel((loaded, total) => {
       download.value = { loaded, total };
     });
     status.value = "scoring";
-    results.value = await scoreCvJob(cvText.value, jdText.value);
+    const { answers } = await evaluate(jobfitState(cvText.value, jdText.value), questions);
+    results.value = toResultRows(answers, questions, calibration);
     status.value = "idle";
   } catch (err) {
     status.value = "error";
@@ -88,9 +93,9 @@ async function onSubmit() {
         <table class="table is-fullwidth is-striped">
           <thead>
             <tr>
-              <th>Aspect</th>
+              <th>Question</th>
               <th>Score</th>
-              <th>Confidence interval</th>
+              <th>Confidence</th>
             </tr>
           </thead>
           <tbody>
@@ -98,10 +103,10 @@ async function onSubmit() {
               <td>{{ row.name }}</td>
               <td>
                 <span v-if="row.insufficientData" class="tag is-warning">insufficient data</span>
-                <span v-else>{{ row.score.toFixed(2) }}</span>
+                <span v-else>{{ row.score.toFixed(1) }} / {{ row.levels - 1 }} <span class="has-text-grey">({{ row.label }})</span></span>
               </td>
               <td>
-                <span v-if="!row.insufficientData">[{{ row.low.toFixed(2) }}, {{ row.high.toFixed(2) }}]</span>
+                <span v-if="!row.insufficientData">{{ row.confidence.toFixed(2) }}</span>
               </td>
             </tr>
           </tbody>

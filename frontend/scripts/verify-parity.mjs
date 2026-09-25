@@ -1,6 +1,8 @@
-// Checks that transformers.js reproduces the pipeline for the sample pair in
-// parity.json (written by pipeline/export.py): identical token ids and pad id, and
-// logits within the stated tolerance of ONNX Runtime in Python. Exits 1 on mismatch.
+// Checks that transformers.js reproduces the pipeline for the sample state in
+// parity.json (written by pipeline/export.py): identical encoding (token ids, segment
+// ids, answer positions, candidate ids) and pad id, answer logits within the stated
+// tolerance of ONNX Runtime in Python, and the same answers -- for JobFit's questions
+// plus a choice and a noul question. Exits 1 on mismatch.
 //
 // Runs on onnxruntime-node (device "cpu"); browsers use the wasm/webgpu providers,
 // which only a real browser can exercise.
@@ -9,7 +11,8 @@
 import { readFileSync } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
 import { AutoTokenizer, env, PreTrainedModel, Tensor } from "@huggingface/transformers";
-import { encodePair, MAX_LENGTH } from "../src/tokenize.mjs";
+import { answers, candidateIds, encode, MAX_CANDIDATES } from "../src/jev.mjs";
+import { PART_BUDGET } from "../src/jobfit.mjs";
 
 const modelDir = resolve(process.argv[2] ?? new URL("../public/models/qwen3-0.6b", import.meta.url).pathname);
 env.allowRemoteModels = false;
@@ -19,31 +22,48 @@ const modelId = basename(modelDir);
 
 const expected = JSON.parse(readFileSync(`${modelDir}/parity.json`, "utf-8"));
 const failures = [];
+const firstDiff = (a, b) => (a.length !== b.length ? Math.min(a.length, b.length) : a.findIndex((x, i) => x !== b[i]));
 
+if (PART_BUDGET !== expected.part_budget) failures.push(`PART_BUDGET ${PART_BUDGET} != ${expected.part_budget}`);
 const tokenizer = await AutoTokenizer.from_pretrained(modelId);
-const { paddedIds, paddedMask } = encodePair(tokenizer, expected.cv_text, expected.jd_text);
-const ids = paddedIds.slice(0, paddedMask.reduce((a, b) => a + b, 0));
 const padId = tokenizer.pad_token_id ?? 0;
-if (padId !== expected.pad_token_id) {
-  failures.push(`pad token id ${padId} != ${expected.pad_token_id}`);
+if (padId !== expected.pad_token_id) failures.push(`pad token id ${padId} != ${expected.pad_token_id}`);
+const encoded = encode(tokenizer, expected.state, expected.questions, expected.part_budget, expected.questions_budget, padId);
+const { ids } = candidateIds(tokenizer, expected.questions);
+for (const [name, actual, want] of [
+  ["input_ids", encoded.input_ids, expected.input_ids],
+  ["segment_ids", encoded.segment_ids, expected.segment_ids],
+  ["answer_positions", encoded.answer_positions, expected.answer_positions],
+  ["candidate_ids", ids.flat(), expected.candidate_ids.flat()],
+]) {
+  const at = firstDiff(actual, want);
+  if (at !== -1) failures.push(`${name} differ (length ${actual.length} vs ${want.length}, first mismatch at ${at})`);
 }
-const firstDiff = ids.findIndex((id, i) => id !== expected.input_ids[i]);
-if (ids.length !== expected.input_ids.length || firstDiff !== -1) {
-  failures.push(`token ids differ (length ${ids.length} vs ${expected.input_ids.length}, first mismatch at ${firstDiff})`);
-}
-console.log(`tokens: ${ids.length} non-pad ids, ${failures.length ? "MISMATCH" : "identical"}`);
+console.log(`encoding: ${encoded.input_ids.length} ids, ${failures.length ? "MISMATCH" : "identical"}`);
 
+const int64 = (values, dims) => new Tensor("int64", BigInt64Array.from(values.map(BigInt)), dims);
 const model = await PreTrainedModel.from_pretrained(modelId, { dtype: "q8", device: "cpu" });
+const length = encoded.input_ids.length;
 const output = await model({
-  input_ids: new Tensor("int64", BigInt64Array.from(paddedIds.map(BigInt)), [1, MAX_LENGTH]),
-  attention_mask: new Tensor("int64", BigInt64Array.from(paddedMask.map(BigInt)), [1, MAX_LENGTH]),
+  input_ids: int64(encoded.input_ids, [1, length]),
+  segment_ids: int64(encoded.segment_ids, [1, length]),
+  answer_positions: int64(encoded.answer_positions, [1, ids.length]),
+  candidate_ids: int64(ids.flat(), [ids.length, MAX_CANDIDATES]),
 });
-const logits = Array.from(output.logits.data, Number);
-const maxDiff = logits.length === expected.logits.length
-  ? Math.max(...logits.map((x, i) => Math.abs(x - expected.logits[i])))
-  : Infinity;
-console.log(`logits: max |diff| ${maxDiff.toExponential(2)} (atol ${expected.atol})`);
-if (!(maxDiff <= expected.atol)) failures.push(`logits differ by ${maxDiff} > ${expected.atol}`);
+const logits = Array.from(output.answer_logits.data, Number);
+const want = expected.answer_logits.flat();
+const maxDiff = logits.length === want.length ? Math.max(...logits.map((x, i) => Math.abs(x - want[i]))) : Infinity;
+console.log(`answer logits: max |diff| ${maxDiff.toExponential(2)} (atol ${expected.atol})`);
+if (!(maxDiff <= expected.atol)) failures.push(`answer logits differ by ${maxDiff} > ${expected.atol}`);
+
+// Same readout on the Python logits: must match the Python answers to float precision.
+const close = (a, b) => (typeof b === "number" ? Math.abs(a - b) <= 1e-9
+  : typeof b === "object" ? Object.keys(b).every((k) => close(a?.[k], b[k])) : a === b);
+const got = answers(expected.questions, want, expected.temperature);
+for (const [qid, answer] of Object.entries(expected.answers)) {
+  if (!close(got[qid], answer)) failures.push(`answer ${qid}: ${JSON.stringify(got[qid])} != ${JSON.stringify(answer)}`);
+}
+console.log(`answers: ${Object.keys(expected.answers).length} questions (${[...new Set(Object.values(got).map((a) => a.type))].join(", ")})`);
 
 if (failures.length) {
   console.error(`PARITY FAILED (${expected.cv} x ${expected.job}):\n  ${failures.join("\n  ")}`);
