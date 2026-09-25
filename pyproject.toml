@@ -1,5 +1,3 @@
 [tool.pytest.ini_options]
 pythonpath = ["pipeline", "data", "data/fetch_jobs"]
 testpaths = ["tests", "data/tests", "data/fetch_jobs/tests", "pipeline/tests"]
-# data/tests and data/fetch_jobs/tests are both packages named `tests`.
-addopts = "--import-mode=importlib"

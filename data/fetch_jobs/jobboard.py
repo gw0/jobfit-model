@@ -184,10 +184,10 @@ def _csv_list(default):
     return parse
 
 
-def parse_cli(*, target=False, sector=False):
+def parse_cli(*, target=False, sector=False, count=False):
     """Builds and parses this script's CLI -- every fetch_*.py/discover_*.py script
     needs the same --include/--exclude/--location/--out-dir flags, plus a positional
-    `target` or a --sector flag depending on which kind."""
+    `target` or a --sector flag depending on which kind, or --count for fetch_all.py."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--include", type=_csv_list(DEFAULT_INCLUDE), default=DEFAULT_INCLUDE,
                          help="comma-separated list of title keywords to include")
@@ -202,11 +202,17 @@ def parse_cli(*, target=False, sector=False):
         parser.add_argument("target", help="org/board slug (or careers URL for workday)")
     if sector:
         parser.add_argument("--sector", default=None, help="tag/category keyword, e.g. ai, fintech")
+    if count:
+        parser.add_argument("--count", type=int, default=None,
+                             help="target total job postings across all companies; stop once reached")
+        parser.add_argument("--max-per-company", type=int, default=None,
+                             help="write at most this many postings per company")
     return parser.parse_args()
 
 
-def save_posts(posts, location=None, out_dir=None):
-    """Apply location filtering, write matching posts, and print a one-line summary.
+def save_posts(posts, location=None, out_dir=None, limit=None):
+    """Apply location filtering, write up to `limit` matching posts, and print a
+    one-line summary.
 
     posts arriving here are already role-matched (fetch/discover apply include/exclude
     themselves), so this only checks location before writing.
@@ -218,6 +224,8 @@ def save_posts(posts, location=None, out_dir=None):
     for post in posts:
         if not matches(post, location=location):
             continue
+        if matched == limit:
+            break
         matched += 1
         _, is_new = write_post(post, jobs_root=out_dir)
         if is_new:

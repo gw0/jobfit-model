@@ -1,6 +1,6 @@
 """Unit tests for the pure split function in build_dataset.py. In-memory fixture, no I/O."""
 
-from build_dataset import make_splits
+from build_dataset import cosine, make_splits, tfidf_vectors
 from corpus import SPLIT_NAMES
 
 CV_IDS = [f"cvs/cv-{i}.md" for i in range(5)]  # 5 CVs
@@ -68,3 +68,44 @@ def test_nonempty_splits_on_this_fixture_size():
     splits = make_splits(CV_IDS, JOBS_BY_COMPANY, cv_ratios=FIXTURE_CV_RATIOS)
     for name in SPLIT_NAMES:
         assert len(splits[name]) > 0, f"{name} split is empty"
+
+
+# --- --jobs-per-cv sampling ----------------------------------------------------------
+
+JOB_IDS = [job_id for job_ids in JOBS_BY_COMPANY.values() for job_id in job_ids]
+TEXTS = {
+    **{cv_id: f"python backend engineer cv{i}" for i, cv_id in enumerate(CV_IDS)},
+    **{job_id: ("python backend role" if i % 2 else "frontend react role") for i, job_id in enumerate(JOB_IDS)},
+}
+
+
+def _sampled(**kwargs):
+    return make_splits(CV_IDS, JOBS_BY_COMPANY, cv_ratios=FIXTURE_CV_RATIOS, jobs_per_cv=2, texts=TEXTS, **kwargs)
+
+
+def test_sampling_pairs_each_cv_with_k_jobs_of_its_own_pool():
+    full, sampled = make_splits(CV_IDS, JOBS_BY_COMPANY, cv_ratios=FIXTURE_CV_RATIOS), _sampled()
+    full_pairs = {(p["cv"], p["job"]) for p in _all_pairs(full)}
+    per_cv = {}
+    for p in _all_pairs(sampled):
+        assert (p["cv"], p["job"]) in full_pairs  # same pools, so the same leakage guarantees
+        per_cv[p["cv"]] = per_cv.get(p["cv"], 0) + 1
+    assert set(per_cv.values()) == {2}
+
+
+def test_sampling_takes_the_nearest_job_first():
+    """k=2: one nearest by cosine (a "python backend" job for these CVs), one random."""
+    pairs = _all_pairs(_sampled())
+    for cv_id in CV_IDS:
+        jobs = [p["job"] for p in pairs if p["cv"] == cv_id]
+        assert any("backend" in TEXTS[job_id] for job_id in jobs)
+
+
+def test_sampling_is_deterministic_given_seed():
+    assert _sampled(seed=3) == _sampled(seed=3)
+
+
+def test_tfidf_ignores_terms_shared_by_every_document():
+    vectors = tfidf_vectors({"a": "role python", "b": "role react"})
+    assert vectors["a"]["role"] == 0 and vectors["a"]["python"] > 0
+    assert cosine(vectors["a"], vectors["b"]) == 0

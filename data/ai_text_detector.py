@@ -9,9 +9,13 @@ torch/transformers are imported lazily so importing this module stays cheap.
 """
 
 import functools
+import threading
 
 MODEL_NAME = "desklib/ai-text-detector-v1.01"
 MAX_LEN = 768  # per the model card's own example
+# label_dataset.py labels on several threads; one model load, one forward at a time
+# (torch already spreads a forward over every core).
+_LOCK = threading.Lock()
 
 
 @functools.lru_cache(maxsize=1)
@@ -51,6 +55,11 @@ def _get_model_and_tokenizer():
 
 def score_llm_generated(text):
     """Return the detector's raw P(machine-generated) in [0,1]."""
+    with _LOCK:
+        return _score(text)
+
+
+def _score(text):
     import torch
 
     model, tokenizer = _get_model_and_tokenizer()

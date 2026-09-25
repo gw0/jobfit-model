@@ -2,6 +2,12 @@
 """Fetches job posts for every company in COMPANIES.
 
 Usage: ./fetch_all.py [--include ...] [--exclude ...] [--location remote-us|remote-eu] [--out-dir ...]
+                     [--count N] [--max-per-company N]
+
+Existing posts are preserved and updated in place by url (see jobboard.write_post); with
+--count, stops once that many total posts exist and warns if the target isn't reached;
+with --max-per-company, writes at most that many of each company's matching posts, so
+no single board dominates the corpus.
 """
 
 import sys
@@ -11,6 +17,7 @@ import fetch_greenhouse
 import fetch_lever
 import fetch_workday
 import jobboard
+from corpus import list_jobs
 
 FETCHERS = {
     "greenhouse": fetch_greenhouse.fetch,
@@ -104,8 +111,18 @@ COMPANIES = [
 
 
 if __name__ == "__main__":
-    args = jobboard.parse_cli()
+    args = jobboard.parse_cli(count=True)
+
+    total = sum(len(v) for v in list_jobs(args.out_dir.parent).values())  # --out-dir is the jobs/ root
+    if args.count is not None and total >= args.count:
+        print(f"already have {total} jobs (target {args.count}); nothing to fetch")
+        if total > args.count:
+            print(f"WARNING: {total} existing jobs exceed the requested --count {args.count}")
+        sys.exit(0)
+
     for name, provider, target in COMPANIES:
+        if args.count is not None and total >= args.count:
+            break
         print(f"--- {name} ({provider}) ---")
         try:
             posts = FETCHERS[provider](target, include=args.include, exclude=args.exclude)
@@ -114,4 +131,8 @@ if __name__ == "__main__":
             continue
         for post in posts:
             post["company"] = name
-        jobboard.save_posts(posts, location=args.location, out_dir=args.out_dir)
+        result = jobboard.save_posts(posts, location=args.location, out_dir=args.out_dir, limit=args.max_per_company)
+        total += result["new"]
+
+    if args.count is not None and total < args.count:
+        print(f"WARNING: only reached {total}/{args.count} jobs after exhausting all companies", file=sys.stderr)
