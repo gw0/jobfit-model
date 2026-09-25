@@ -1,0 +1,3 @@
+{"job": "jobs/grafana-labs/20260709-staff-backend-engineer-grafana-enterprise-canada-remote.md", "job_post_clarity_structure_quality_score": 0.875, "job_post_clarity_structure_quality_confidence": 0.7, "labeling_method": "llm-judge:claude-sonnet-5"}
+{"job": "jobs/grafana-labs/20260729-staff-software-engineer-adaptive-telemetry-databases-canada-remote.md", "job_post_clarity_structure_quality_score": 0.875, "job_post_clarity_structure_quality_confidence": 0.75, "labeling_method": "llm-judge:claude-sonnet-5"}
+{"job": "jobs/grafana-labs/20260818-staff-backend-engineer-alerting-germany-remote.md", "job_post_clarity_structure_quality_score": 0.875, "job_post_clarity_structure_quality_confidence": 0.85, "labeling_method": "llm-judge:claude-sonnet-5"}
