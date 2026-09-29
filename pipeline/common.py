@@ -26,10 +26,10 @@ QUESTION_IDS = list(QUESTIONS)
 NUM_QUESTIONS = len(QUESTION_IDS)
 
 # JobFit's state is {CV, Job description}; frontend/src/jobfit.mjs mirrors these.
-PART_BUDGET = 1024
+STATE_BUDGET = 3072
 QUESTIONS_BUDGET = 1024
 
-DEFAULT_MODEL = "Qwen/Qwen3-0.6B"
+DEFAULT_MODEL = "HuggingFaceTB/SmolLM2-135M-Instruct"
 STAGES = ("zeroshot", "finetuned", "calibrated", "quantized")
 MLFLOW_EXPERIMENT = "jobfit-pipeline"
 
@@ -50,7 +50,7 @@ def add_common_args(parser):
     parser.add_argument("--model", default=DEFAULT_MODEL, help="HF base model id")
     parser.add_argument("--candidate", default=None,
                         help="this run's name: the model slug for default settings, else the slug "
-                             "plus what changed, e.g. qwen3-0.6b-r16 (default: the model slug)")
+                             "plus what changed, e.g. smollm2-135m-instruct-r16 (default: the model slug)")
     parser.add_argument("--confidence-floor", type=float, default=0.3,
                         help="labels below this judge confidence are masked out")
     parser.add_argument("--batch-size", type=int, default=4)
@@ -204,11 +204,18 @@ def load_tokenizer(model_name_or_path):
     return tokenizer
 
 
+def bf16_supported():
+    """CUDA, or a CPU with native bf16 (AVX512-BF16/AMX); others emulate it far too slowly."""
+    import torch
+
+    return torch.cuda.is_available() or torch.ops.mkldnn._is_mkldnn_bf16_supported()
+
+
 def load_jev_model(model_name_or_path, attn_implementation="sdpa", device=None):
     """The causal LM (native lm_head intact) wrapped as a JevModel, on `device` (default:
-    CUDA when available, else CPU). fp32 weights, not bf16: CPUs without native bf16
-    emulate it far too slowly, and on CUDA train.py gets bf16 speed from autocast
-    instead, so every checkpoint is the same fp32 model whichever host trained it."""
+    CUDA when available, else CPU). fp32 weights, not bf16: train.py gets bf16 speed
+    from autocast where `bf16_supported()`, so every checkpoint is the same fp32 model
+    whichever host trained it."""
     import torch
     from transformers import AutoModelForCausalLM
 

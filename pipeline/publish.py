@@ -4,7 +4,7 @@ candidate's benchmark report, register it in MLflow (moving the `champion` alias
 the winner), and optionally push the winner to the HF Hub and the report to W&B.
 
 Usage:
-    ./pipeline/publish.py --runs-dir runs_smoke --model Qwen/Qwen3-0.6B
+    ./pipeline/publish.py --runs-dir runs_smoke --model HuggingFaceTB/SmolLM2-135M-Instruct
     HF_TOKEN=... ./pipeline/publish.py --runs-dir runs_smoke --push-hf --hf-org <org>
     WANDB_API_KEY=... ./pipeline/publish.py --runs-dir runs_smoke --push-wandb
 
@@ -27,6 +27,8 @@ REGISTERED_MODEL = "jobfit"
 BASE_MODEL_LICENSES = {
     "qwen3-0.6b": "apache-2.0",
     "qwen3.5-4b": "apache-2.0",
+    "smollm2-360m-instruct": "apache-2.0",
+    "smollm2-135m-instruct": "apache-2.0",
     "llama-3.2-1b": "llama3.2",
     "minicpm5-2b": None,
 }
@@ -109,7 +111,7 @@ def build_model_card(report, repo_id):
         "",
         f"# {repo_id}",
         "",
-        "CV/job-description fit-scoring model from the [JobFit](https://github.com/gw0/jobfit) "
+        "CV/job-description fit-scoring model from the [JobFit](https://github.com/gw0/jobfit-model) "
         "project; see its `runs/<candidate>/reports/` for the full benchmark report. It is a "
         "Jev-shaped typed-decision model: a state plus typed questions (score / choice / noul) "
         "in, one typed answer per question out, each read off the causal LM's own `lm_head` "

@@ -17,7 +17,7 @@ spec:
   arguments:
     parameters:
       - name: model
-        value: "Qwen/Qwen3-0.6B"
+        value: "HuggingFaceTB/SmolLM2-135M-Instruct"
       # <runs-dir>/<candidate>/; empty means the model slug (pipeline/common.py).
       - name: candidate
         value: ""
@@ -28,6 +28,8 @@ spec:
         value: "8"
       - name: lora-alpha
         value: "16"
+      - name: lora-layers
+        value: "8"
       - name: lr-finetune
         value: "1e-4"
       - name: epochs-finetune
@@ -78,6 +80,7 @@ spec:
                     --epochs {{workflow.parameters.epochs-finetune}}
                     --lora-rank {{workflow.parameters.lora-rank}}
                     --lora-alpha {{workflow.parameters.lora-alpha}}
+                    --lora-layers {{workflow.parameters.lora-layers}}
 
           - name: evaluate-finetuned
             dependencies: [finetune]

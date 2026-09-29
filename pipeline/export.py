@@ -88,7 +88,7 @@ def parity_fixture(session, tokenizer, pair, dataset_dir, calibration):
                          corpus.read_job_body(dataset_dir / pair["job"]))
     questions = {**common.QUESTIONS, **PARITY_EXTRA_QUESTIONS}
     questions_budget = 2 * common.QUESTIONS_BUDGET
-    encoded = jev.encode(tokenizer, state, questions, common.PART_BUDGET, questions_budget, tokenizer.pad_token_id)
+    encoded = jev.encode(tokenizer, state, questions, common.STATE_BUDGET, questions_budget, tokenizer.pad_token_id)
     candidate_ids, _ = jev.candidate_ids(tokenizer, questions)
     feeds = {name: np.array([encoded[name]]) for name in common.MODEL_INPUTS}
     answer_logits = session.run(["answer_logits"], {**feeds, "candidate_ids": np.array(candidate_ids)})[0][0]
@@ -98,7 +98,7 @@ def parity_fixture(session, tokenizer, pair, dataset_dir, calibration):
         "job": pair["job"],
         "state": state,
         "questions": questions,
-        "part_budget": common.PART_BUDGET,
+        "state_budget": common.STATE_BUDGET,
         "questions_budget": questions_budget,
         "pad_token_id": tokenizer.pad_token_id,
         **{name: encoded[name] for name in common.MODEL_INPUTS},

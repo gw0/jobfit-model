@@ -4,10 +4,11 @@ projections of the base causal LM, trained through the Jev readout -- each quest
 answer is its lm_head distribution over its candidate tokens, fit to the two-hot
 target of the judge's label with a confidence-weighted soft cross-entropy. Adapters are
 merged before saving, so every later stage sees a plain dense causal LM. There is no
-trained head: the untrained base model is the `zeroshot` evaluation.
+trained head: the untrained base model is the `zeroshot` evaluation. Only the top
+`--lora-layers` layers get adapters, so the layers below run forward-only.
 
 With a `val` split the best epoch by val loss is kept, otherwise the last one.
-The Trainer logs to the active MLflow run.
+The Trainer logs its loss curve (every 10 steps) to the active MLflow run.
 
 Usage:
     ./pipeline/train.py --dataset-dir datasets_smoke --runs-dir runs_smoke
@@ -35,7 +36,9 @@ class JevTrainer(transformers.Trainer):
         self.candidate_mask = jev_model.candidate_mask(candidate_counts)
 
     def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
-        logits = model(inputs["input_ids"], inputs["segment_ids"], inputs["answer_positions"],
+        # Nothing after the last answer position can reach an answer (causal), so drop the padding.
+        end = int(inputs["answer_positions"].max()) + 1
+        logits = model(inputs["input_ids"][:, :end], inputs["segment_ids"][:, :end], inputs["answer_positions"],
                        self.candidate_ids.to(inputs["input_ids"].device))
         loss = jev_model.answer_loss(logits, inputs["targets"], inputs["weights"],
                                      self.candidate_mask.to(logits.device))
@@ -58,12 +61,13 @@ def _build_model(args):
 
     tokenizer = common.load_tokenizer(args.model)
     model = common.load_jev_model(args.model)
-    # LoRA adapters sit in every layer, so gradients flow through the whole backbone;
-    # recomputing activations in the backward pass keeps that tractable on CPU.
+    # Gradients flow back through the adapter layers only; recomputing their activations in
+    # the backward pass keeps that tractable on CPU. The layers below stay forward-only.
     model.lm.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
-    model.lm.enable_input_require_grads()
+    layers = model.lm.config.num_hidden_layers
+    top = range(layers - args.lora_layers, layers) if args.lora_layers else None
     lora = LoraConfig(r=args.lora_rank, lora_alpha=args.lora_alpha,
-                      target_modules=args.lora_target_modules.split(","))
+                      target_modules=args.lora_target_modules.split(","), layers_to_transform=top)
     peft_lm = get_peft_model(model.lm, lora)  # injects the adapters into model.lm in place
     return model, peft_lm, tokenizer
 
@@ -94,7 +98,8 @@ def _run(args):
         per_device_train_batch_size=args.batch_size,
         per_device_eval_batch_size=args.batch_size,
         seed=args.seed,
-        bf16=torch.cuda.is_available(),  # autocast only: the weights stay fp32 (common.load_jev_model)
+        use_cpu=not torch.cuda.is_available(),  # HF only allows bf16 without a GPU when told it is a CPU run
+        bf16=common.bf16_supported(),  # autocast only: the weights stay fp32 (common.load_jev_model)
         eval_strategy=strategy,
         save_strategy=strategy,
         save_total_limit=1,
@@ -103,7 +108,7 @@ def _run(args):
         load_best_model_at_end=val_cache is not None,
         metric_for_best_model="loss",
         prediction_loss_only=True,
-        logging_strategy="epoch",
+        logging_steps=10,
         label_names=LABEL_NAMES,
         remove_unused_columns=False,
         report_to=["mlflow"],
@@ -122,7 +127,7 @@ def _run(args):
         mlflow.log_params({"confidence_floor": args.confidence_floor,
                            "train_pairs": len(train_cache["pairs"]),
                            "val_pairs": 0 if val_cache is None else len(val_cache["pairs"]),
-                           "lora_rank": args.lora_rank, "lora_alpha": args.lora_alpha,
+                           "lora_rank": args.lora_rank, "lora_alpha": args.lora_alpha, "lora_layers": args.lora_layers,
                            "lora_target_modules": args.lora_target_modules})
         common.log_dataset_input(train_cache, args.run_dir, "train", context="training")
         if val_cache is not None:
@@ -146,6 +151,7 @@ def main():
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--lora-rank", type=int, default=8)
     parser.add_argument("--lora-alpha", type=int, default=16)
+    parser.add_argument("--lora-layers", type=int, default=8, help="adapters on the top N layers (0: all)")
     parser.add_argument("--lora-target-modules", default=LORA_TARGET_MODULES)
     args = common.parse_args(parser, "finetune")
     with common.stage_span("finetune"):

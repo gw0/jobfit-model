@@ -97,7 +97,7 @@ def test_evaluate_answers_every_question_type():
                  "c": {"type": "choice", "question": "Which?", "criteria": {"x": "first", "y": "second"}},
                  "n": {"type": "noul", "question": "Is it?", "criteria": {"true": "yes", "false": "no"}}}
     answers = jev_model.evaluate(model, _WordTokenizer(), {"CV": "python dev", "Job": "python role"}, questions,
-                                 part_budget=8, questions_budget=64, temperature=2.0)
+                                 state_budget=16, questions_budget=64, temperature=2.0)
     assert [a["type"] for a in answers.values()] == ["score", "choice", "noul"]
     assert 0.0 <= answers["s"]["score"] <= 2.0 and answers["c"]["choice"] in ("x", "y")
     assert 0.0 <= answers["n"]["noul"] <= 1.0

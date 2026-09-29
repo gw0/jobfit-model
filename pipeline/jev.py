@@ -93,22 +93,19 @@ def candidate_ids(tokenizer, questions):
     return ids, counts
 
 
-def encode(tokenizer, state, questions, part_budget, questions_budget, pad_token_id=0):
-    """Tokenizes `state` ({title: text}, each part header + text truncated to
-    `part_budget` tokens) followed by one branch per question, padded to
-    len(state) * part_budget + questions_budget. Returns {"input_ids", "segment_ids"
+def encode(tokenizer, state, questions, state_budget, questions_budget, pad_token_id=0):
+    """Tokenizes `state` ({title: text}, each part header + text, in order) truncated as a
+    whole to `state_budget` tokens -- only the last part is cut -- followed by one branch per
+    question, padded to state_budget + questions_budget. Returns {"input_ids", "segment_ids"
     (-1 padding, 0 state, k for question k), "answer_positions" (the last token of each
-    branch), "truncated" ({title: bool})}. Raises ValueError if the questions don't fit
-    `questions_budget` -- question text is never truncated."""
-    input_ids, segment_ids, truncated = [], [], {}
+    branch), "truncated" (whether the state was cut)}. Raises ValueError if the questions
+    don't fit `questions_budget` -- question text is never truncated."""
+    state_ids = []
     for i, (title, text) in enumerate(state.items()):
-        header = tokenizer.encode(render_part_header(title, i == 0), add_special_tokens=False)
-        body = tokenizer.encode(text, add_special_tokens=False)
-        keep = max(0, part_budget - len(header))
-        truncated[title] = len(body) > keep
-        part = (header + body[:keep])[:part_budget]
-        input_ids += part
-        segment_ids += [0] * len(part)
+        state_ids += tokenizer.encode(render_part_header(title, i == 0), add_special_tokens=False)
+        state_ids += tokenizer.encode(text, add_special_tokens=False)
+    input_ids = state_ids[:state_budget]
+    segment_ids = [0] * len(input_ids)
 
     answer_positions, questions_len = [], 0
     for k, q in enumerate(questions.values(), start=1):
@@ -120,12 +117,12 @@ def encode(tokenizer, state, questions, part_budget, questions_budget, pad_token
     if questions_len > questions_budget:
         raise ValueError(f"questions take {questions_len} tokens, over the {questions_budget} budget")
 
-    pad = len(state) * part_budget + questions_budget - len(input_ids)
+    pad = state_budget + questions_budget - len(input_ids)
     return {
         "input_ids": input_ids + [pad_token_id] * pad,
         "segment_ids": segment_ids + [-1] * pad,
         "answer_positions": answer_positions,
-        "truncated": truncated,
+        "truncated": len(state_ids) > state_budget,
     }
 
 

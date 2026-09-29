@@ -8,7 +8,7 @@
 #   SCALE=smoke|full   corpus datasets_$(SCALE)/, pipeline output runs_$(SCALE)/
 #   MODEL=<hf-id>      base model
 #   CANDIDATE=<name>   runs_$(SCALE)/<name>/: the model slug for default settings, else the
-#                      slug plus what changed, e.g. qwen3-0.6b-r16 (config.json has the rest)
+#                      slug plus what changed, e.g. smollm2-135m-instruct-r16 (config.json has the rest)
 #   GPU=1              run the pipeline on NVIDIA GPUs (Docker --gpus, or a GPU KinD cluster)
 # Dataset steps: jobs cvs dataset labels. Pipeline steps run either locally in Docker,
 # local-{prepare,zeroshot,finetune,calibrate,export,publish} (each depending on the
@@ -28,7 +28,7 @@ NPM ?= npm
 SCALE ?= smoke
 DATASET := datasets_$(SCALE)
 RUNS := runs_$(SCALE)
-MODEL ?= Qwen/Qwen3-0.6B
+MODEL ?= HuggingFaceTB/SmolLM2-135M-Instruct
 CANDIDATE ?= $(shell echo '$(notdir $(MODEL))' | tr A-Z a-z)
 GPU ?= 0
 
@@ -224,7 +224,7 @@ cluster-mlflow:
 # Submits one workflow for $(CANDIDATE) and waits for it; expects `make cluster-up` done
 # with ./datasets and ./runs linked to this scale (checked -- the cluster mounted
 # whatever they pointed at then). Hyperparameters beyond the defaults go in as workflow
-# parameters, e.g. ARGO_PARAMS="-p lora-rank=16" CANDIDATE=qwen3-0.6b-r16.
+# parameters, e.g. ARGO_PARAMS="-p lora-rank=16" CANDIDATE=smollm2-135m-instruct-r16.
 # Polls the workflow phase rather than `argo submit --watch`: one long-lived stream over
 # the socat tunnel is fragile across a run of hours.
 ARGO_PARAMS ?=

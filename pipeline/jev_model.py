@@ -66,9 +66,9 @@ def answer_loss(answer_logits, targets, weights, mask):
     return (ce * weights).sum() / weights.sum().clamp_min(1e-12)
 
 
-def evaluate(model, tokenizer, state, questions, part_budget, questions_budget, temperature=1.0):
+def evaluate(model, tokenizer, state, questions, state_budget, questions_budget, temperature=1.0):
     """The in-process Jev call: {id: answer} for one state."""
-    encoded = jev.encode(tokenizer, state, questions, part_budget, questions_budget, tokenizer.pad_token_id)
+    encoded = jev.encode(tokenizer, state, questions, state_budget, questions_budget, tokenizer.pad_token_id)
     ids, _ = jev.candidate_ids(tokenizer, questions)
     with torch.no_grad():
         logits = model(torch.tensor([encoded["input_ids"]]), torch.tensor([encoded["segment_ids"]]),

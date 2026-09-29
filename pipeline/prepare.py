@@ -2,8 +2,8 @@
 """`prepare` stage (specs §6): verify and materialise the committed splits, never re-split.
 
 Asserts train/test share no CV and no company, fails on any Presidio PII finding, then
-encodes each CV/JD pair with every question (jev.encode: CV then JD, each truncated to
-1024 tokens, then the 17 question branches in a 1024-token block, padded to 3072) and
+encodes each CV/JD pair with every question (jev.encode: CV then JD, truncated to 3072
+tokens, then the 17 question branches in a 1024-token block, padded to 4096) and
 caches the tensors. `test` additionally gets a `test_shuffled` cache for the
 shuffled-pair control: each test CV paired with a job it is not paired with.
 
@@ -63,7 +63,7 @@ def _cache_split(tokenizer, dataset_dir, run_dir, name, pairs):
     rows = [
         jev.encode(tokenizer, common.jobfit_state((dataset_dir / p["cv"]).read_text(encoding="utf-8"),
                                            corpus.read_job_body(dataset_dir / p["job"])),
-                   common.QUESTIONS, common.PART_BUDGET, common.QUESTIONS_BUDGET, tokenizer.pad_token_id)
+                   common.QUESTIONS, common.STATE_BUDGET, common.QUESTIONS_BUDGET, tokenizer.pad_token_id)
         for p in pairs
     ]
     candidate_ids, candidate_counts = jev.candidate_ids(tokenizer, common.QUESTIONS)
@@ -76,9 +76,7 @@ def _cache_split(tokenizer, dataset_dir, run_dir, name, pairs):
         "candidate_counts": candidate_counts,
     }, path)
     n = len(pairs)
-    truncated = {title: sum(r["truncated"][title] for r in rows) for title in rows[0]["truncated"]}
-    print(f"{name}: {n} pair(s) -> {path} ("
-          + ", ".join(f"{title} truncated {count}/{n}" for title, count in truncated.items()) + ")")
+    print(f"{name}: {n} pair(s) -> {path} (state truncated {sum(r['truncated'] for r in rows)}/{n})")
 
 
 def _pii_scan(dataset_dir):

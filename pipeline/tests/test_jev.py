@@ -62,28 +62,28 @@ class _TwoTokenDigits(FakeTokenizer):
 
 def test_encode_layout_segments_and_answer_positions():
     tok = FakeTokenizer()
-    out = jev.encode(tok, {"CV": "a b", "Job": "c"}, {"s": SCORE, "n": NOUL}, part_budget=5,
+    out = jev.encode(tok, {"CV": "a b", "Job": "c"}, {"s": SCORE, "n": NOUL}, state_budget=10,
                      questions_budget=40, pad_token_id=0)
     # "# CV a b" = 4 tokens, "--- # Job c" = 4 tokens, then the two branches.
     seg = out["segment_ids"]
-    assert seg[:8] == [0] * 8 and out["truncated"] == {"CV": False, "Job": False}
-    assert len(out["input_ids"]) == len(seg) == 2 * 5 + 40
+    assert seg[:8] == [0] * 8 and out["truncated"] is False
+    assert len(out["input_ids"]) == len(seg) == 10 + 40
     for k, pos in enumerate(out["answer_positions"], start=1):
         assert seg[pos] == k and (pos + 1 == len(seg) or seg[pos + 1] != k)
     assert seg[out["answer_positions"][-1] + 1:] == [-1] * (len(seg) - out["answer_positions"][-1] - 1)
     assert out["input_ids"][out["answer_positions"][0]] == tok.vocab["Answer"]
 
 
-def test_encode_truncates_each_part_including_its_header():
-    out = jev.encode(FakeTokenizer(), {"CV": "w " * 10, "Job": "j"}, {"s": SCORE}, part_budget=5,
+def test_encode_truncates_the_state_as_a_whole():
+    out = jev.encode(FakeTokenizer(), {"CV": "a b", "Job": "w " * 10}, {"s": SCORE}, state_budget=6,
                      questions_budget=40)
-    assert out["truncated"] == {"CV": True, "Job": False}
-    assert out["segment_ids"].count(0) == 5 + 4
+    assert out["truncated"] is True
+    assert out["segment_ids"].count(0) == 6  # "# CV a b" kept whole, the Job part cut inside its header
 
 
 def test_encode_refuses_to_truncate_questions():
     with pytest.raises(ValueError, match="budget"):
-        jev.encode(FakeTokenizer(), {"CV": "a"}, {"s": SCORE}, part_budget=5, questions_budget=5)
+        jev.encode(FakeTokenizer(), {"CV": "a"}, {"s": SCORE}, state_budget=5, questions_budget=5)
 
 
 def test_score_target_is_two_hot_with_the_label_as_its_mean():

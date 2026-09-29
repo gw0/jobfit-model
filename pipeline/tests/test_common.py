@@ -81,18 +81,18 @@ def _parse(tmp_path, *argv, stage=None):
 
 def test_parse_args_candidate_defaults_to_the_model_slug(tmp_path):
     args = _parse(tmp_path)
-    assert args.candidate == "qwen3-0.6b" and args.run_dir == tmp_path / "qwen3-0.6b"
-    args = _parse(tmp_path, "--candidate", "qwen3-0.6b-lr3e-4", "--lr", "3e-4")
-    assert args.run_dir == tmp_path / "qwen3-0.6b-lr3e-4"
+    assert args.candidate == "smollm2-135m-instruct" and args.run_dir == tmp_path / "smollm2-135m-instruct"
+    args = _parse(tmp_path, "--candidate", "smollm2-135m-instruct-lr3e-4", "--lr", "3e-4")
+    assert args.run_dir == tmp_path / "smollm2-135m-instruct-lr3e-4"
     assert not (args.run_dir / "config.json").exists()  # only stages that build the candidate record it
 
 
 def test_parse_args_merges_each_stage_into_config_json(tmp_path):
     _parse(tmp_path, "--run-group", "wf-1", stage="prepare")
     _parse(tmp_path, "--lr", "3e-4", stage="finetune")
-    config = common.read_json(tmp_path / "qwen3-0.6b" / "config.json")
+    config = common.read_json(tmp_path / "smollm2-135m-instruct" / "config.json")
     assert set(config) == {"prepare", "finetune"} and config["finetune"]["lr"] == 3e-4
-    assert config["prepare"]["model"] == "Qwen/Qwen3-0.6B"
+    assert config["prepare"]["model"] == "HuggingFaceTB/SmolLM2-135M-Instruct"
     assert "runs_dir" not in config["prepare"] and "run_group" not in config["prepare"]
 
 
