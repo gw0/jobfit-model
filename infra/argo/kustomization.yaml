@@ -10,3 +10,14 @@ namespace: jobfit
 resources:
   - github.com/argoproj/argo-workflows/manifests/cluster-install?ref=v3.6.2
   - executor-rbac.yaml
+
+# Single-user local cluster: let the UI use the server's own service account instead of
+# asking for a bearer token.
+patches:
+  - target:
+      kind: Deployment
+      name: argo-server
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/args/-
+        value: --auth-mode=server

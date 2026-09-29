@@ -240,9 +240,10 @@ def predict_answer_logits(model, cache, batch_size=4):
     """(N, Q, MAX_CANDIDATES) answer logits as numpy, for a JevModel or an ONNX Runtime
     InferenceSession of its export alike."""
     import torch
+    from tqdm import tqdm
 
     chunks = []
-    for start in range(0, len(cache["pairs"]), batch_size):
+    for start in tqdm(range(0, len(cache["pairs"]), batch_size), desc="predicting", unit="batch", dynamic_ncols=True):
         batch = [cache[name][start:start + batch_size] for name in MODEL_INPUTS]
         if isinstance(model, torch.nn.Module):
             device = next((p.device for p in model.parameters()), torch.device("cpu"))
@@ -314,11 +315,11 @@ def mlflow_run(stage, args, tags=None):
     tags = {"stage": stage, "model": args.model, "candidate": args.candidate, "git_sha": git_sha(), **(tags or {})}
     run_name, run_group = f"{stage}-{args.candidate}", args.run_group
     if not run_group:
-        with mlflow.start_run(run_name=run_name, tags=tags) as run:
+        with mlflow.start_run(run_name=run_name, tags=tags, log_system_metrics=True) as run:
             yield run
         return
     with mlflow.start_run(run_id=_group_parent_run_id(mlflow, run_group)):
-        with mlflow.start_run(run_name=run_name, nested=True, tags=tags) as run:
+        with mlflow.start_run(run_name=run_name, nested=True, tags=tags, log_system_metrics=True) as run:
             yield run
 
 
@@ -349,25 +350,63 @@ def log_model_signature(model, cache):
 _current_stage = None
 
 
-def _observe_gpu_utilization(_options):
-    """Sampled by the periodic metric reader for as long as the process runs; 0 on
-    CPU-only hosts (specs §7 accepts that)."""
-    from opentelemetry.metrics import Observation
+def _cpu_utilization():
+    import psutil
 
-    value = 0.0
-    try:
-        import torch
+    return psutil.cpu_percent()
 
-        if torch.cuda.is_available():
-            value = float(torch.cuda.utilization())
-    except Exception:  # noqa: BLE001 -- telemetry must never fail a stage
-        pass
-    yield Observation(value, {"stage": _current_stage or "unknown"})
+
+def _cpu_memory():
+    import psutil
+
+    return psutil.virtual_memory().percent
+
+
+def _gpu_utilization():
+    import torch
+
+    return torch.cuda.utilization() if torch.cuda.is_available() else 0.0
+
+
+def _gpu_memory():
+    import torch
+
+    if not torch.cuda.is_available():
+        return 0.0
+    free, total = torch.cuda.mem_get_info()
+    return (total - free) / total * 100
+
+
+# Gauge name -> (description, reader). The GPU readers give 0 on CPU-only hosts (specs §7
+# accepts that).
+_GAUGES = {
+    "cpu_utilization_percent": ("CPU utilization during a pipeline stage", _cpu_utilization),
+    "cpu_memory_percent": ("System memory in use during a pipeline stage", _cpu_memory),
+    "gpu_utilization_percent": ("GPU utilization during a pipeline stage, 0 on CPU-only hosts", _gpu_utilization),
+    "gpu_memory_percent": ("GPU memory in use during a pipeline stage, 0 on CPU-only hosts", _gpu_memory),
+}
+
+
+def _observer(read):
+    """A gauge callback, sampled by the periodic metric reader for as long as the process
+    runs, attributing the reading to the current stage."""
+
+    def observe(_options):
+        from opentelemetry.metrics import Observation
+
+        try:
+            value = float(read())
+        except Exception:  # noqa: BLE001 -- telemetry must never fail a stage
+            value = 0.0
+        yield Observation(value, {"stage": _current_stage or "unknown"})
+
+    return observe
 
 
 def _otel_tracer():
-    """A tracer exporting to OTEL_EXPORTER_OTLP_ENDPOINT, with the GPU gauge registered
-    once per process; None when no collector is configured or the SDK is missing."""
+    """A tracer exporting to OTEL_EXPORTER_OTLP_ENDPOINT, with the utilization gauges
+    registered once per process; None when no collector is configured or the SDK is
+    missing."""
     if not os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT"):
         return None
     try:
@@ -389,16 +428,16 @@ def _otel_tracer():
         trace.set_tracer_provider(tracer_provider)
         reader = PeriodicExportingMetricReader(OTLPMetricExporter(), export_interval_millis=10_000)
         metrics.set_meter_provider(MeterProvider(resource=resource, metric_readers=[reader]))
-        metrics.get_meter("jobfit.pipeline").create_observable_gauge(
-            "gpu_utilization_percent", callbacks=[_observe_gpu_utilization],
-            description="GPU utilization during a pipeline stage, 0 on CPU-only hosts",
-        )
+        _cpu_utilization()  # psutil measures since its previous call: the first one reads 0
+        meter = metrics.get_meter("jobfit.pipeline")
+        for name, (description, read) in _GAUGES.items():
+            meter.create_observable_gauge(name, callbacks=[_observer(read)], description=description)
     return trace.get_tracer("jobfit.pipeline")
 
 
 @contextmanager
 def stage_span(name):
-    """Wraps a stage in an OTel span and attributes GPU-utilization samples to it."""
+    """Wraps a stage in an OTel span and attributes utilization samples to it."""
     global _current_stage
     _current_stage = name
     tracer = _otel_tracer()

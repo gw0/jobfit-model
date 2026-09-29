@@ -23,6 +23,11 @@ spacy
 # OTLP exporter for common.stage_span.
 opentelemetry-exporter-otlp-proto-grpc
 
+# CPU/GPU utilization and memory, for both common.stage_span's gauges and MLflow's system
+# metrics (nvidia-ml-py provides pynvml; with no GPU it just finds no device).
+psutil
+nvidia-ml-py
+
 # CPU-only wheel; GPU hosts install a CUDA build instead.
 --extra-index-url https://download.pytorch.org/whl/cpu
 torch

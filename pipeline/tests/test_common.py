@@ -70,6 +70,25 @@ def test_stage_span_without_collector_is_a_passthrough(monkeypatch):
             raise ValueError("boom")
 
 
+def test_utilization_gauges_observe_percentages_for_the_current_stage(monkeypatch):
+    pytest.importorskip("opentelemetry.metrics")
+    monkeypatch.setattr(common, "_current_stage", "unit-test")
+    for _, read in common._GAUGES.values():
+        (observation,) = common._observer(read)(None)
+        assert 0 <= observation.value <= 100
+        assert observation.attributes == {"stage": "unit-test"}
+
+
+def test_utilization_gauge_reader_failure_reads_zero():
+    pytest.importorskip("opentelemetry.metrics")
+
+    def broken():
+        raise RuntimeError("no device")
+
+    (observation,) = common._observer(broken)(None)
+    assert observation.value == 0.0
+
+
 # --- parse_args / candidate ------------------------------------------------------------
 
 def _parse(tmp_path, *argv, stage=None):

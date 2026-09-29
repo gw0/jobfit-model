@@ -15,6 +15,9 @@ ENV GIT_SHA=$GIT_SHA
 # past this container's lifetime instead of landing in the throwaway default ~/.cache.
 ENV HF_HOME=/cache/huggingface
 
+# Redraw every tqdm bar (the Trainer's and common.predict_answer_logits') at most every 2 min.
+ENV TQDM_MININTERVAL=120
+
 # data/ provides corpus.py and pii_scrub.py, which pipeline/ imports.
 COPY questions.json questions.json
 COPY data/ data/

@@ -1,6 +1,6 @@
 # OTLP receiver for the pipeline stages (common.stage_span): spans go to the debug
 # exporter (their arrival shows in the collector's own :8888 counters), metrics --
-# gpu_utilization_percent -- to the Prometheus exporter on :8889.
+# {cpu,gpu}_{utilization,memory}_percent -- to the Prometheus exporter on :8889.
 #
 # Endpoints are bound to 0.0.0.0 explicitly: the collector's defaults bind loopback,
 # which the Service cannot reach.

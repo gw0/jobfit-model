@@ -150,9 +150,13 @@ copy-model:
 frontend-check: local-export copy-model build
 	cd frontend && $(NPM) install
 	node frontend/scripts/verify-parity.mjs frontend/public/models/$(CANDIDATE)
-	docker run --rm -d -p $(FRONTEND_CHECK_PORT):8080 --name $(FRONTEND_CHECK_NAME) jobfit-frontend
-	curl -sf --retry 5 --retry-connrefused http://localhost:$(FRONTEND_CHECK_PORT)/ > /dev/null && echo "frontend served OK"; \
-		status=$$?; docker stop $(FRONTEND_CHECK_NAME); exit $$status
+	docker run --rm -d --name $(FRONTEND_CHECK_NAME) jobfit-frontend
+	for i in 1 2 3 4 5; do \
+		docker exec $(FRONTEND_CHECK_NAME) wget -qO /dev/null http://127.0.0.1:8080/ && status=0 && break; \
+		status=$$?; sleep 1; \
+	done; \
+	[ $$status != 0 ] || echo "frontend served OK"; \
+	docker stop $(FRONTEND_CHECK_NAME); exit $$status
 
 # --- cluster (KinD + Argo + MLflow + OTel collector) ------------------------------------
 # kind-config.yaml mounts ./datasets and ./runs when the cluster is created, so link them
@@ -162,14 +166,16 @@ frontend-check: local-export copy-model build
 # comparison; MLflow's hostPath store is not.
 
 # Two checkouts of this repo on the same host must not collide: derive a short hash from
-# the checkout path and use it for the cluster name and every hardcoded host port/name
-# below, so each checkout gets its own by default -- still overridable via these ?= vars.
+# the checkout path and use it for the cluster name and every host port/name below, so
+# each checkout gets its own by default -- still overridable via these ?= vars. Ports are
+# a block of 10 starting at PORT_BASE (10000..19990, below the ephemeral range).
 REPO_HASH := $(shell printf '%s' "$(CURDIR)" | md5sum | cut -c1-4)
-PORT_OFFSET := $(shell echo $$((0x$(REPO_HASH) % 1000)))
+PORT_BASE := $(shell echo $$((10000 + 10 * (0x$(REPO_HASH) % 1000))))
 
 KIND_CLUSTER ?= jobfit-$(REPO_HASH)
-TUNNEL_PORT ?= $(shell echo $$((16443 + $(PORT_OFFSET))))
-FRONTEND_CHECK_PORT ?= $(shell echo $$((8080 + $(PORT_OFFSET))))
+TUNNEL_PORT ?= $(PORT_BASE)
+MLFLOW_PORT ?= $(shell echo $$(($(PORT_BASE) + 1)))
+ARGO_PORT ?= $(shell echo $$(($(PORT_BASE) + 2)))
 FRONTEND_CHECK_NAME := jobfit-frontend-check-$(REPO_HASH)
 KIND_DIR := .kind
 export KUBECONFIG := $(CURDIR)/$(KIND_DIR)/kubeconfig.yaml
@@ -189,10 +195,14 @@ cluster-up:
 	kubectl apply -k infra/kustomize/base
 	kubectl apply -k infra/argo
 	kubectl -n jobfit wait --for=condition=Ready pod --all --timeout=180s
+	kubectl -n jobfit port-forward svc/mlflow $(MLFLOW_PORT):5000 >/dev/null 2>&1 & echo $$! > $(KIND_DIR)/forward.pid
+	kubectl -n jobfit port-forward svc/argo-server $(ARGO_PORT):2746 >/dev/null 2>&1 & echo $$! >> $(KIND_DIR)/forward.pid
+	@echo "MLflow UI: http://localhost:$(MLFLOW_PORT)  Argo UI: https://localhost:$(ARGO_PORT) (self-signed cert)"
 
 cluster-down:
+	[ ! -f $(KIND_DIR)/forward.pid ] || kill $$(cat $(KIND_DIR)/forward.pid) 2>/dev/null || true
 	[ ! -f $(KIND_DIR)/tunnel.pid ] || kill $$(cat $(KIND_DIR)/tunnel.pid) 2>/dev/null || true
-	rm -f $(KIND_DIR)/tunnel.pid $(KIND_DIR)/kubeconfig.yaml
+	rm -f $(KIND_DIR)/forward.pid $(KIND_DIR)/tunnel.pid $(KIND_DIR)/kubeconfig.yaml
 	kind delete cluster --name $(KIND_CLUSTER)
 
 # In-cluster curl pods, so the check uses the same DNS names as the pipeline pods.
@@ -203,6 +213,7 @@ cluster-check:
 		curl -sf http://mlflow.jobfit.svc.cluster.local:5000/health
 	kubectl -n jobfit run otel-check --rm -i --restart=Never --image=curlimages/curl -- \
 		curl -sf http://otel-collector.jobfit.svc.cluster.local:8889/metrics
+	$(MAKE) cluster-mlflow
 
 # Pipeline pods are the ones carrying the workflow label; the stage name is an annotation.
 CLUSTER_LOG_LINES ?= 30
@@ -214,12 +225,10 @@ cluster-logs:
 		echo; \
 	done
 
+# Latest runs with status and summary metrics, via the standing port-forward from cluster-up.
+MLFLOW_RUNS ?= 10
 cluster-mlflow:
-	kubectl -n jobfit port-forward svc/mlflow 5000:5000 >/dev/null 2>&1 & \
-		PF_PID=$$!; \
-		trap "kill $$PF_PID 2>/dev/null" EXIT; \
-		sleep 2; \
-		MLFLOW_TRACKING_URI=http://localhost:5000 $(PY) -c "import mlflow; df = mlflow.search_runs(experiment_names=['jobfit-pipeline'], order_by=['start_time DESC']); cols=[c for c in ['tags.mlflow.runName','tags.mlflow.parentRunId','status','start_time'] if c in df.columns]; print(df[cols].to_string(index=False)) if not df.empty else print('no runs yet')"
+	MLFLOW_TRACKING_URI=http://localhost:$(MLFLOW_PORT) $(PY) -c "import mlflow; df = mlflow.search_runs(experiment_names=['jobfit-pipeline'], order_by=['start_time DESC'], max_results=$(MLFLOW_RUNS)); cols=['tags.mlflow.runName','status','start_time']+[c for c in df.columns if c.startswith('metrics.')]; print(df[cols].rename(columns=lambda c: c.split('.')[-1]).to_string(index=False)) if not df.empty else print('no runs yet')"
 
 # Submits one workflow for $(CANDIDATE) and waits for it; expects `make cluster-up` done
 # with ./datasets and ./runs linked to this scale (checked -- the cluster mounted

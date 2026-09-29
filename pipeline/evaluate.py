@@ -145,13 +145,18 @@ def _run(args):
     common.write_json(out_path, report)
     print(f"evaluated {report['n']} pair(s) on split {args.split!r} -> {out_path}")
 
-    with common.mlflow_run("evaluate", args, tags={"eval_stage": args.stage}):
+    with common.mlflow_run(f"evaluate-{args.stage}", args) as run:
         mlflow.log_params({"split": args.split, "n_pairs": report["n"]})
         summary = {
             "mean_mae": metrics.nanmean([m["mae"] for m in report_metrics.values()]),
             "mean_abs_shift": metrics.nanmean([s["mean_abs_shift"] for s in shuffled.values()]) if shuffled else np.nan,
         }
-        mlflow.log_metrics({k: v for k, v in summary.items() if not np.isnan(v)})
+        summary = {k: v for k, v in summary.items() if not np.isnan(v)}
+        mlflow.log_metrics(summary)
+        # The workflow's parent run charts each metric across the stages (step = stage index).
+        if parent_id := run.data.tags.get("mlflow.parentRunId"):
+            for key, value in summary.items():
+                mlflow.MlflowClient().log_metric(parent_id, key, value, step=common.STAGES.index(args.stage))
         common.log_dataset_input(cache, args.run_dir, args.split, context="evaluation")
         if train_cache is not None:
             common.log_dataset_input(train_cache, args.run_dir, "train", context="baseline_fit")
