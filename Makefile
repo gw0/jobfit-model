@@ -52,7 +52,7 @@ endif
 
 # Jobs judged per CV in one labeling call (pairs.jsonl only; the double-label QC pass
 # always uses one job per call).
-JOBS_PER_CALL ?= 5
+JOBS_PER_CALL ?= 10
 
 # Entry-point scripts use `#!/usr/bin/env python3`; resolve that to the venv.
 export PATH := $(CURDIR)/.venv/bin:$(PATH)

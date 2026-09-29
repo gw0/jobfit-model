@@ -108,7 +108,7 @@ def _label_file(path, what, items, item_key, record_key, fn, force, workers, chu
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--out-dir", type=Path, default=corpus.DEFAULT_DATASET_DIR)
-    parser.add_argument("--model", default="claude-sonnet-5", help="model for the primary judging pass")
+    parser.add_argument("--model", default="claude-sonnet-5-5", help="model for the primary judging pass")
     parser.add_argument("--force", action="store_true",
                         help="relabel everything, ignoring existing labels/*.jsonl (e.g. after switching --model)")
     parser.add_argument("--double-label", action="store_true",

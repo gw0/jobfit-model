@@ -3,7 +3,7 @@
     "type": "score",
     "name": "Skills match",
     "scope": "pairwise",
-    "question": "How well do the candidate's technical skills cover the technical skills the job requires?",
+    "question": "How well do the candidate's technical skills cover those the job requires?",
     "criteria": ["Almost none of the required skills", "A few, with major gaps", "About half", "Most, with minor gaps", "Essentially all"]
   },
   "experience_level_match": {
@@ -11,13 +11,13 @@
     "name": "Experience level match",
     "scope": "pairwise",
     "question": "How well do the candidate's years of relevant experience match what the job asks for?",
-    "criteria": ["Far below", "Clearly below", "Slightly below", "Roughly meets it", "Fully meets or exceeds it"]
+    "criteria": ["Far below", "Clearly below", "Slightly below", "Roughly meets it", "Meets or exceeds it"]
   },
   "domain_industry_relevance": {
     "type": "score",
     "name": "Domain/industry relevance",
     "scope": "pairwise",
-    "question": "How relevant is the candidate's industry or domain background to the job's industry?",
+    "question": "How relevant is the candidate's industry or domain background to the job's?",
     "criteria": ["Unrelated", "Distantly related", "Partly overlapping", "Closely related", "Same domain"]
   },
   "education_qualifications_match": {
@@ -31,14 +31,14 @@
     "type": "score",
     "name": "Seniority/role-level fit",
     "scope": "pairwise",
-    "question": "How well does the candidate's current seniority and role type fit the level of this job?",
+    "question": "How well do the candidate's seniority and role type fit the job's level?",
     "criteria": ["Very different level", "Two steps off", "One step off", "Close", "Same level"]
   },
   "career_trajectory_fit": {
     "type": "score",
     "name": "Career trajectory fit",
     "scope": "pairwise",
-    "question": "How natural a next step would this job be, given the candidate's career so far?",
+    "question": "How natural a next step is this job, given the candidate's career so far?",
     "criteria": ["A step back or unrelated", "An odd move", "A plausible pivot", "A natural next step", "The obvious next step"]
   },
   "responsibilities_overlap": {
@@ -52,7 +52,7 @@
     "type": "score",
     "name": "Location/work-arrangement fit",
     "scope": "pairwise",
-    "question": "How compatible are the candidate's location and work arrangement with the job's (remote, hybrid, onsite, region)?",
+    "question": "How compatible are the candidate's location and work arrangement with the job's?",
     "criteria": ["Incompatible", "Hard to reconcile", "Workable with changes", "Mostly compatible", "Fully compatible"]
   },
   "soft_skills_match": {
@@ -73,14 +73,14 @@
     "type": "score",
     "name": "CV clarity/structure quality",
     "scope": "cv",
-    "question": "How clear and well-structured is the CV text?",
+    "question": "How clear and well-structured is the CV?",
     "criteria": ["Very hard to parse", "Poorly structured", "Adequate", "Clear", "Excellent"]
   },
   "job_post_clarity_structure_quality": {
     "type": "score",
     "name": "Job post clarity/structure quality",
     "scope": "job",
-    "question": "How clear and well-structured is the job description text?",
+    "question": "How clear and well-structured is the job description?",
     "criteria": ["Very hard to parse", "Poorly structured", "Adequate", "Clear", "Excellent"]
   },
   "overall_fit_score": {
@@ -108,14 +108,14 @@
     "type": "score",
     "name": "Interview-Readiness Score",
     "scope": "pairwise",
-    "question": "How likely is a recruiter to invite this candidate to interview for this job?",
+    "question": "How likely is a recruiter to interview this candidate for this job?",
     "criteria": ["Very unlikely", "Unlikely", "Possibly", "Likely", "Very likely"]
   },
   "culture_company_alignment_score": {
     "type": "score",
     "name": "Culture/company-alignment score",
     "scope": "pairwise",
-    "question": "How well does the candidate align with the company's mission, culture and values as described in the job description?",
+    "question": "How well does the candidate align with the company's mission, culture and values?",
     "criteria": ["Clearly misaligned", "Somewhat misaligned", "Neutral", "Aligned", "Strongly aligned"]
   }
 }
