@@ -4,6 +4,7 @@ themselves live in data/corpus.py."""
 
 import argparse
 import html
+import re
 import sys
 import time
 from datetime import date
@@ -20,7 +21,10 @@ from corpus import DEFAULT_DATASET_DIR, format_frontmatter, parse_frontmatter, s
 JOBS_ROOT = DEFAULT_DATASET_DIR / "jobs"
 FRONTMATTER_KEYS = ("company", "title", "location", "url", "posted_at")
 
-USER_AGENT = "JobFit/0.1 (+https://github.com/gw0/jobfit)"
+EMAIL_RE = re.compile(r"[\w.%+-]+@[\w-]+(?:\.[\w-]+)+")
+REDACTED_EMAIL = "redacted@example.com"
+
+USER_AGENT = "JobFit/0.1 (+https://github.com/gw0/jobfit-model)"
 
 session = requests.Session()
 session.headers.update({"User-Agent": USER_AGENT})
@@ -89,6 +93,11 @@ def _date_slug(posted_at):
     return date.today().strftime("%Y%m%d")
 
 
+def redact_emails(text):
+    """Replace every email address with the fake one pii_scrub.py whitelists."""
+    return EMAIL_RE.sub(REDACTED_EMAIL, text)
+
+
 def write_post(post, jobs_root=None):
     """Write one normalized post dict to jobs/<company-slug>/, deduping by url.
 
@@ -117,7 +126,8 @@ def write_post(post, jobs_root=None):
         is_new = True
 
     meta = {key: post.get(key) for key in FRONTMATTER_KEYS}
-    path.write_text(format_frontmatter(meta) + "\n\n" + post.get("description", "") + "\n", encoding="utf-8")
+    description = redact_emails(post.get("description", ""))
+    path.write_text(format_frontmatter(meta) + "\n\n" + description + "\n", encoding="utf-8")
     return path, is_new
 
 

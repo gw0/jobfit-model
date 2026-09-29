@@ -84,6 +84,15 @@ def test_write_post_dedupes_by_url(tmp_path):
     assert corpus.parse_frontmatter(path.read_text())[0]["url"] == "https://x/1"
 
 
+def test_write_post_redacts_emails(tmp_path):
+    post = {"title": "Backend Engineer", "company": "Acme", "url": "https://x/1", "posted_at": "2026-06-15",
+            "description": "Mail [jane.doe@acme.com](mailto:jane.doe@acme.com) or hr+jobs@acme.co.uk."}
+    path, _ = jobboard.write_post(post, jobs_root=tmp_path)
+    body = path.read_text()
+    assert "acme.com" not in body and "acme.co.uk" not in body
+    assert body.endswith("Mail [redacted@example.com](mailto:redacted@example.com) or redacted@example.com.\n")
+
+
 def test_save_posts_limit_caps_matching_posts(tmp_path):
     posts = [{"title": f"Engineer {i}", "company": "Acme", "url": f"https://x/{i}",
               "posted_at": "2026-06-15", "description": "d"} for i in range(5)]

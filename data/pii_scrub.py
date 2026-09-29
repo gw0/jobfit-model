@@ -23,7 +23,7 @@ DEFAULT_SPACY_MODEL = "en_core_web_sm"
 # here, so the scan is scoped to types that are unambiguous PII if present at all.
 SCAN_ENTITIES = [
     "EMAIL_ADDRESS", "PHONE_NUMBER", "CREDIT_CARD", "US_SSN", "IBAN_CODE",
-    "IP_ADDRESS", "CRYPTO", "US_DRIVER_LICENSE", "US_PASSPORT", "MEDICAL_LICENSE",
+    "IP_ADDRESS", "CRYPTO", "US_PASSPORT", "MEDICAL_LICENSE",
 ]
 
 # generate_cvs.py asks for firstname.lastname@example.com contact emails.
