@@ -7,14 +7,14 @@
 // Runs on onnxruntime-node (device "cpu"); browsers use the wasm/webgpu providers,
 // which only a real browser can exercise.
 //
-// Usage: node scripts/verify-parity.mjs [model-dir]   (default: public/models/qwen3-0.6b)
+// Usage: node scripts/verify-parity.mjs [model-dir]   (default: public/models/smollm2-135m-instruct)
 import { readFileSync } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
 import { AutoTokenizer, env, PreTrainedModel, Tensor } from "@huggingface/transformers";
 import { answers, candidateIds, encode, MAX_CANDIDATES } from "../src/jev.mjs";
-import { PART_BUDGET } from "../src/jobfit.mjs";
+import { STATE_BUDGET } from "../src/jobfit.mjs";
 
-const modelDir = resolve(process.argv[2] ?? new URL("../public/models/qwen3-0.6b", import.meta.url).pathname);
+const modelDir = resolve(process.argv[2] ?? new URL("../public/models/smollm2-135m-instruct", import.meta.url).pathname);
 env.allowRemoteModels = false;
 env.allowLocalModels = true;
 env.localModelPath = dirname(modelDir) + "/";
@@ -24,11 +24,11 @@ const expected = JSON.parse(readFileSync(`${modelDir}/parity.json`, "utf-8"));
 const failures = [];
 const firstDiff = (a, b) => (a.length !== b.length ? Math.min(a.length, b.length) : a.findIndex((x, i) => x !== b[i]));
 
-if (PART_BUDGET !== expected.part_budget) failures.push(`PART_BUDGET ${PART_BUDGET} != ${expected.part_budget}`);
+if (STATE_BUDGET !== expected.state_budget) failures.push(`STATE_BUDGET ${STATE_BUDGET} != ${expected.state_budget}`);
 const tokenizer = await AutoTokenizer.from_pretrained(modelId);
 const padId = tokenizer.pad_token_id ?? 0;
 if (padId !== expected.pad_token_id) failures.push(`pad token id ${padId} != ${expected.pad_token_id}`);
-const encoded = encode(tokenizer, expected.state, expected.questions, expected.part_budget, expected.questions_budget, padId);
+const encoded = encode(tokenizer, expected.state, expected.questions, expected.state_budget, expected.questions_budget, padId);
 const { ids } = candidateIds(tokenizer, expected.questions);
 for (const [name, actual, want] of [
   ["input_ids", encoded.input_ids, expected.input_ids],

@@ -4,7 +4,7 @@ import { AutoTokenizer, env, PreTrainedModel, Tensor } from "@huggingface/transf
 import * as pdfjsLib from "pdfjs-dist";
 
 import { answers, candidateIds, encode, type Answer, type Question } from "./jev.mjs";
-import { PART_BUDGET, QUESTIONS_BUDGET } from "./jobfit.mjs";
+import { STATE_BUDGET, QUESTIONS_BUDGET } from "./jobfit.mjs";
 import { downloadTracker, type Calibration } from "./scoring";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -15,7 +15,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
 // The repo ships no weights: a deployed build loads them from the HF Hub repo baked in
 // via VITE_HF_MODEL_REPO; without it, from a local copy under /models/<slug>/.
 const HF_MODEL_REPO = import.meta.env.VITE_HF_MODEL_REPO;
-const MODEL_ID = HF_MODEL_REPO || "qwen3-0.6b";
+const MODEL_ID = HF_MODEL_REPO || "smollm2-135m-instruct";
 env.allowRemoteModels = Boolean(HF_MODEL_REPO);
 env.allowLocalModels = !HF_MODEL_REPO;
 
@@ -55,14 +55,14 @@ const int64 = (values: number[], dims: number[]) => new Tensor("int64", BigInt64
 
 /**
  * The Jev call: one typed answer per question id, all from one forward pass. The state
- * is a {title: text} mapping, each part truncated to PART_BUDGET tokens.
+ * is a {title: text} mapping, truncated as a whole to STATE_BUDGET tokens.
  */
 export async function evaluate(
   state: Record<string, string>,
   questions: Record<string, Question>,
 ): Promise<{ model: string; answers: Record<string, Answer> }> {
   const { tokenizer, model, calibration } = await loadModel();
-  const encoded = encode(tokenizer, state, questions, PART_BUDGET, QUESTIONS_BUDGET, tokenizer.pad_token_id ?? 0);
+  const encoded = encode(tokenizer, state, questions, STATE_BUDGET, QUESTIONS_BUDGET, tokenizer.pad_token_id ?? 0);
   const { ids } = candidateIds(tokenizer, questions);
   const length = encoded.input_ids.length;
   const numQuestions = ids.length;

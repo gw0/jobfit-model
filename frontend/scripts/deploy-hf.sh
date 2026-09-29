@@ -6,7 +6,7 @@
 #
 # Usage:
 #   HF_TOKEN=hf_... HF_SPACE_REPO=<user-or-org>/jobfit \
-#   VITE_HF_MODEL_REPO=<user-or-org>/jobfit-qwen3-0.6b frontend/scripts/deploy-hf.sh
+#   VITE_HF_MODEL_REPO=<user-or-org>/jobfit-smollm2-135m-instruct frontend/scripts/deploy-hf.sh
 set -euo pipefail
 
 : "${HF_TOKEN:?set HF_TOKEN to a real HF Hub API token with write access}"

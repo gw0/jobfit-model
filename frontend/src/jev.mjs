@@ -77,30 +77,26 @@ export function candidateIds(tokenizer, questions) {
 }
 
 /**
- * Tokenizes `state` ({title: text}, each part header + text truncated to `partBudget`
- * tokens) followed by one branch per question, padded to
- * (number of parts) * partBudget + questionsBudget. Throws if the questions don't fit
+ * Tokenizes `state` ({title: text}, each part header + text, in order) truncated as a whole
+ * to `stateBudget` tokens -- only the last part is cut -- followed by one branch per
+ * question, padded to stateBudget + questionsBudget. Throws if the questions don't fit
  * `questionsBudget` -- question text is never truncated.
  * @param {Tokenizer} tokenizer
  * @param {Record<string, string>} state
  * @param {Record<string, Question>} questions
- * @param {number} partBudget
+ * @param {number} stateBudget
  * @param {number} questionsBudget
  * @param {number} padTokenId
  */
-export function encode(tokenizer, state, questions, partBudget, questionsBudget, padTokenId = 0) {
+export function encode(tokenizer, state, questions, stateBudget, questionsBudget, padTokenId = 0) {
   /** @type {number[]} */ const inputIds = [];
   /** @type {number[]} */ const segmentIds = [];
-  /** @type {Record<string, boolean>} */ const truncated = {};
+  /** @type {number[]} */ const stateIds = [];
   Object.entries(state).forEach(([title, text], i) => {
-    const header = encodeText(tokenizer, renderPartHeader(title, i === 0));
-    const body = encodeText(tokenizer, text);
-    const keep = Math.max(0, partBudget - header.length);
-    truncated[title] = body.length > keep;
-    const part = [...header, ...body.slice(0, keep)].slice(0, partBudget);
-    inputIds.push(...part);
-    segmentIds.push(...new Array(part.length).fill(0));
+    stateIds.push(...encodeText(tokenizer, renderPartHeader(title, i === 0)), ...encodeText(tokenizer, text));
   });
+  inputIds.push(...stateIds.slice(0, stateBudget));
+  segmentIds.push(...new Array(inputIds.length).fill(0));
 
   const answerPositions = [];
   let questionsLen = 0;
@@ -115,12 +111,12 @@ export function encode(tokenizer, state, questions, partBudget, questionsBudget,
     throw new Error(`questions take ${questionsLen} tokens, over the ${questionsBudget} budget`);
   }
 
-  const pad = Object.keys(state).length * partBudget + questionsBudget - inputIds.length;
+  const pad = stateBudget + questionsBudget - inputIds.length;
   return {
     input_ids: [...inputIds, ...new Array(pad).fill(padTokenId)],
     segment_ids: [...segmentIds, ...new Array(pad).fill(-1)],
     answer_positions: answerPositions,
-    truncated,
+    truncated: stateIds.length > stateBudget,
   };
 }
 

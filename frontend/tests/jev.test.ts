@@ -44,11 +44,11 @@ describe("questions", () => {
 describe("encode", () => {
   it("lays out state, branches and padding", () => {
     const tok = fakeTokenizer();
-    const out = encode(tok, { CV: "a b", Job: "c" }, { s: SCORE, n: NOUL }, 5, 40, 0);
+    const out = encode(tok, { CV: "a b", Job: "c" }, { s: SCORE, n: NOUL }, 10, 40, 0);
     const seg = out.segment_ids;
     expect(seg.slice(0, 8)).toEqual(new Array(8).fill(0));
-    expect(out.truncated).toEqual({ CV: false, Job: false });
-    expect(out.input_ids).toHaveLength(2 * 5 + 40);
+    expect(out.truncated).toBe(false);
+    expect(out.input_ids).toHaveLength(10 + 40);
     out.answer_positions.forEach((pos: number, k: number) => {
       expect(seg[pos]).toBe(k + 1);
       expect(seg[pos + 1]).not.toBe(k + 1);
@@ -56,10 +56,10 @@ describe("encode", () => {
     expect(out.input_ids[out.answer_positions[0]]).toBe(tok.vocab.get("Answer"));
   });
 
-  it("truncates each part including its header", () => {
-    const out = encode(fakeTokenizer(), { CV: "w ".repeat(10), Job: "j" }, { s: SCORE }, 5, 40);
-    expect(out.truncated).toEqual({ CV: true, Job: false });
-    expect(out.segment_ids.filter((s: number) => s === 0)).toHaveLength(9);
+  it("truncates the state as a whole", () => {
+    const out = encode(fakeTokenizer(), { CV: "a b", Job: "w ".repeat(10) }, { s: SCORE }, 6, 40);
+    expect(out.truncated).toBe(true);
+    expect(out.segment_ids.filter((s: number) => s === 0)).toHaveLength(6);
   });
 
   it("refuses to truncate questions", () => {

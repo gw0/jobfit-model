@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
 
 interface ImportMetaEnv {
-  // HF Hub model repo id (e.g. "org/jobfit-qwen3-0.6b") baked in by scripts/deploy-hf.sh;
+  // HF Hub model repo id (e.g. "org/jobfit-smollm2-135m-instruct") baked in by scripts/deploy-hf.sh;
   // unset for local serving.
   readonly VITE_HF_MODEL_REPO?: string;
 }
