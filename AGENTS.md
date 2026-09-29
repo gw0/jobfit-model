@@ -16,6 +16,8 @@ Commands (see README.md for details):
 - `make cluster-up`/`make cluster-down` must be run manually by the user, prefixed
   with `! DOCKER_HOST=` (e.g. `! DOCKER_HOST= make cluster-up`) — not run directly by
   the agent.
+- `.env.local`, `.env.cluster` and `.env.publish` hold secrets: never read, print or
+  commit them, and never put a token on a command line.
 - `pipeline/jev.py` / `pipeline/jev_model.py` and `frontend/src/jev.mjs` must stay in
   exact parity. Mirror any change to one in the other, and check with
   `node frontend/scripts/verify-parity.mjs <model-export-dir>`.

@@ -18,7 +18,7 @@
 	jobs cvs dataset labels \
 	local-prepare local-zeroshot local-finetune local-calibrate local-export local-publish \
 	copy-model frontend-check \
-	cluster-up cluster-down cluster-check cluster-logs cluster-mlflow cluster-run \
+	cluster-up cluster-secrets cluster-down cluster-check cluster-logs cluster-mlflow cluster-run \
 	publish-hf deploy-hf
 
 VENV ?= .venv/bin
@@ -113,9 +113,9 @@ labels:
 # --- pipeline, local (Docker) -------------------------------------------------------
 # The corpus is mounted read-only; every stage writes only into $(RUNS)/$(CANDIDATE)/.
 
-DOCKER_RUN = docker run --rm $(if $(filter 1,$(GPU)),--gpus all) \
-	-v $(CURDIR)/$(DATASET):/data:ro -v $(CURDIR)/$(RUNS):/runs -v $(CURDIR)/.cache:/cache jobfit-pipeline
-STAGE_ARGS = --dataset-dir /data --runs-dir /runs --model $(MODEL) --candidate $(CANDIDATE)
+DOCKER_RUN = docker run --rm $(if $(filter 1,$(GPU)),--gpus all) $(if $(wildcard .env.local),--env-file .env.local) \
+	-v $(CURDIR)/$(DATASET):/datasets:ro -v $(CURDIR)/$(RUNS):/runs -v $(CURDIR)/.cache:/cache jobfit-pipeline
+STAGE_ARGS = --dataset-dir /datasets --runs-dir /runs --model $(MODEL) --candidate $(CANDIDATE)
 
 local-prepare: build
 	mkdir -p $(RUNS)
@@ -193,11 +193,19 @@ cluster-up:
 	until kubectl get nodes >/dev/null 2>&1; do sleep 2; done  # API server/tunnel warm-up
 	[ "$(GPU)" != 1 ] || { infra/gpu/setup-node.sh $(KIND_CLUSTER)-control-plane && kubectl apply -k infra/gpu; }
 	kubectl apply -k infra/kustomize/base
+	$(MAKE) cluster-secrets
 	kubectl apply -k infra/argo
 	kubectl -n jobfit wait --for=condition=Ready pod --all --timeout=180s
 	kubectl -n jobfit port-forward svc/mlflow $(MLFLOW_PORT):5000 >/dev/null 2>&1 & echo $$! > $(KIND_DIR)/forward.pid
 	kubectl -n jobfit port-forward svc/argo-server $(ARGO_PORT):2746 >/dev/null 2>&1 & echo $$! >> $(KIND_DIR)/forward.pid
 	@echo "MLflow UI: http://localhost:$(MLFLOW_PORT)  Argo UI: https://localhost:$(ARGO_PORT) (self-signed cert)"
+
+# Stage pods read HF_TOKEN from the hf-token Secret (pipeline/workflow.yaml); it comes from
+# .env.cluster. Idempotent: rerun after editing the file to rotate the token.
+cluster-secrets:
+	if [ -f .env.cluster ]; then \
+		kubectl -n jobfit create secret generic hf-token --from-env-file=.env.cluster --dry-run=client -o yaml | kubectl apply -f -; \
+	else echo "cluster-secrets: no .env.cluster, skipping (gated models need HF_TOKEN)"; fi
 
 cluster-down:
 	[ ! -f $(KIND_DIR)/forward.pid ] || kill $$(cat $(KIND_DIR)/forward.pid) 2>/dev/null || true
@@ -267,10 +275,11 @@ cluster-run: build
 		 curl -sf http://otel-collector.jobfit.svc.cluster.local:8889/metrics | grep -q gpu_utilization_percent'
 	echo "report: $(RUNS)/$(CANDIDATE)/reports/report.md"
 
-# --- publishing (needs HF_TOKEN) -------------------------------------------------------
+# --- publishing (needs HF_TOKEN, a write token, in .env.publish) -----------------------
 
 publish-hf:
-	./pipeline/publish.py --runs-dir $(RUNS) --model $(MODEL) --candidate $(CANDIDATE) --push-hf
+	set -a; . ./.env.publish; set +a; \
+		./pipeline/publish.py --runs-dir $(RUNS) --model $(MODEL) --candidate $(CANDIDATE) --push-hf
 
 deploy-hf:
-	frontend/scripts/deploy-hf.sh
+	set -a; . ./.env.publish; set +a; frontend/scripts/deploy-hf.sh

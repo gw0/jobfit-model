@@ -153,16 +153,23 @@ spec:
         args:
           - >-
             {{inputs.parameters.command}}
-            --dataset-dir /data --runs-dir /runs --model {{workflow.parameters.model}}
+            --dataset-dir /datasets --runs-dir /runs --model {{workflow.parameters.model}}
             --candidate '{{workflow.parameters.candidate}}' --run-group {{workflow.name}}
         env:
+          # From `make cluster-secrets`; optional, so public models run without it.
+          - name: HF_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: hf-token
+                key: HF_TOKEN
+                optional: true
           - name: MLFLOW_TRACKING_URI
             value: "http://mlflow.jobfit.svc.cluster.local:5000"
           - name: OTEL_EXPORTER_OTLP_ENDPOINT
             value: "http://otel-collector.jobfit.svc.cluster.local:4317"
         volumeMounts:
           - name: dataset
-            mountPath: /data
+            mountPath: /datasets
             readOnly: true
           - name: runs
             mountPath: /runs

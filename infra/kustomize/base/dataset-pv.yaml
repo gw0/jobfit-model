@@ -1,4 +1,4 @@
-# hostPath-backed PV for pipeline/workflow.yaml's `dataset` volume (mounted /data by
+# hostPath-backed PV for pipeline/workflow.yaml's `dataset` volume (mounted /datasets by
 # every pipeline stage) -- same reasoning/pattern as mlflow-pv.yaml. Path matches
 # infra/kind-config.yaml's extraMounts containerPath.
 apiVersion: v1
