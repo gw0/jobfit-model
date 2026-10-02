@@ -148,7 +148,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     common.add_common_args(parser)
     parser.add_argument("--epochs", type=int, default=5)
-    parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--lr", type=float, default=4e-4)
     parser.add_argument("--lora-rank", type=int, default=8)
     parser.add_argument("--lora-alpha", type=int, default=16)
     parser.add_argument("--lora-layers", type=int, default=8, help="adapters on the top N layers (0: all)")

@@ -46,14 +46,15 @@ def add_common_args(parser):
     parser.add_argument("--dataset-dir", type=Path, default=REPO_ROOT / "datasets",
                         help="committed corpus (cvs/jobs/labels/splits), read-only")
     parser.add_argument("--runs-dir", type=Path, default=REPO_ROOT / "runs",
-                        help="pipeline output, one <candidate>/ subdirectory per candidate")
+                        help="pipeline output, one <candidate>/ subdirectory per candidate, "
+                             "plus the local MLflow store in mlflow/")
     parser.add_argument("--model", default=DEFAULT_MODEL, help="HF base model id")
     parser.add_argument("--candidate", default=None,
                         help="this run's name: the model slug for default settings, else the slug "
                              "plus what changed, e.g. smollm2-135m-instruct-r16 (default: the model slug)")
     parser.add_argument("--confidence-floor", type=float, default=0.3,
                         help="labels below this judge confidence are masked out")
-    parser.add_argument("--batch-size", type=int, default=4)
+    parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--run-group", default=None,
                         help="nest this stage's MLflow run under the parent run of this group")
@@ -236,7 +237,7 @@ def onnx_bytes(directory):
 MODEL_INPUTS = ("input_ids", "segment_ids", "answer_positions")
 
 
-def predict_answer_logits(model, cache, batch_size=4):
+def predict_answer_logits(model, cache, batch_size=16):
     """(N, Q, MAX_CANDIDATES) answer logits as numpy, for a JevModel or an ONNX Runtime
     InferenceSession of its export alike."""
     import torch
@@ -308,9 +309,11 @@ def _group_parent_run_id(mlflow, run_group):
 def mlflow_run(stage, args, tags=None):
     """An MLflow run tagged with stage/model/candidate/git SHA. With `args.run_group`
     (Argo passes the workflow name) it is nested under that group's parent run. The
-    tracking server is taken from MLFLOW_TRACKING_URI, else a local ./mlruns store."""
+    tracking server is taken from MLFLOW_TRACKING_URI, else a local <runs-dir>/mlflow store."""
     import mlflow
 
+    if not os.environ.get("MLFLOW_TRACKING_URI"):
+        mlflow.set_tracking_uri((args.runs_dir / "mlflow").resolve().as_uri())
     mlflow.set_experiment(MLFLOW_EXPERIMENT)
     tags = {"stage": stage, "model": args.model, "candidate": args.candidate, "git_sha": git_sha(), **(tags or {})}
     run_name, run_group = f"{stage}-{args.candidate}", args.run_group

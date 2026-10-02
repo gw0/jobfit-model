@@ -31,7 +31,7 @@ spec:
       - name: lora-layers
         value: "8"
       - name: lr-finetune
-        value: "1e-4"
+        value: "4e-4"
       - name: epochs-finetune
         value: "5"
 

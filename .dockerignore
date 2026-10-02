@@ -8,7 +8,6 @@ frontend/public/models/
 *.tsbuildinfo
 datasets*/
 runs*/
-mlruns/
 *.onnx
 *.onnx_data
 *.safetensors
