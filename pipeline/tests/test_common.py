@@ -19,7 +19,7 @@ def test_build_targets_joins_pairwise_and_single_doc_labels():
         {"jobs/acme/1.md": {"job_post_clarity_structure_quality_score": 0.6, "job_post_clarity_structure_quality_confidence": 0.5,
                             "job_post_likely_llm_generated_score": 0.2, "job_post_likely_llm_generated_confidence": 0.4}},
         {("cvs/a.md", "jobs/acme/1.md"): {"skills_match_score": 0.7, "skills_match_confidence": 0.9,
-                                          "overall_fit_score_score": None}},
+                                          "overall_fit_score": None}},
     )
     targets, confidences = common.build_targets(pairs, labels)
     assert targets.shape == confidences.shape == (1, common.NUM_QUESTIONS)
@@ -31,7 +31,7 @@ def test_build_targets_joins_pairwise_and_single_doc_labels():
     assert at("skills_match") == (0.7, 0.9)
     assert at("cv_clarity_structure_quality") == (0.8, 0.9)
     assert at("job_post_likely_llm_generated") == (0.2, 0.4)
-    assert all(math.isnan(v) for v in at("culture_company_alignment_score"))
+    assert all(math.isnan(v) for v in at("culture_company_alignment"))
 
 
 def test_build_targets_empty_and_unlabeled():

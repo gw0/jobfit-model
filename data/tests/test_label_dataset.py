@@ -78,29 +78,29 @@ def test_level_to_score():
 
 def test_label_pairs_for_cv_maps_levels_and_writes_null_not_nan(monkeypatch):
     monkeypatch.setattr(label_pairs, "ask_json",
-                        lambda prompt, model=None: {"job_1": {"overall_fit_score": {"level": 3, "confidence": 0.8}}})
+                        lambda prompt, model=None: {"job_1": {"overall_fit": {"level": 3, "confidence": 0.8}}})
     records = label_pairs.label_pairs_for_cv("cvs/a.md", "cv", [("jobs/x/1.md", "jd")], load_pairwise_questions())
     record = records[0]
     assert record["job"] == "jobs/x/1.md"
-    assert record["overall_fit_score_score"] == 0.75 and record["overall_fit_score_confidence"] == 0.8
+    assert record["overall_fit_score"] == 0.75 and record["overall_fit_confidence"] == 0.8
     assert record["skills_match_score"] is None
     json.dumps(record, allow_nan=False)
 
 
 def test_label_pairs_for_cv_batched_reply_maps_each_job_independently(monkeypatch):
     reply = {
-        "job_1": {"overall_fit_score": {"level": 4, "confidence": 0.9}},
+        "job_1": {"overall_fit": {"level": 4, "confidence": 0.9}},
         # job_2 is entirely missing from the reply
-        "job_3": {"overall_fit_score": {"level": 0, "confidence": 0.1}},
+        "job_3": {"overall_fit": {"level": 0, "confidence": 0.1}},
     }
     monkeypatch.setattr(label_pairs, "ask_json", lambda prompt, model=None: reply)
     jobs = [("jobs/a.md", "a"), ("jobs/b.md", "b"), ("jobs/c.md", "c")]
     records = label_pairs.label_pairs_for_cv("cvs/x.md", "cv", jobs, load_pairwise_questions())
 
     assert [r["job"] for r in records] == [job_id for job_id, _ in jobs]
-    assert records[0]["overall_fit_score_score"] == 1.0
-    assert records[1]["overall_fit_score_score"] is None and records[1]["skills_match_score"] is None
-    assert records[2]["overall_fit_score_score"] == 0.0
+    assert records[0]["overall_fit_score"] == 1.0
+    assert records[1]["overall_fit_score"] is None and records[1]["skills_match_score"] is None
+    assert records[2]["overall_fit_score"] == 0.0
 
 
 def test_chunk_by_cv_never_mixes_cvs_and_respects_max_size():

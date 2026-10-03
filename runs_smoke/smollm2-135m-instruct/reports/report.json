@@ -118,7 +118,7 @@
         "confidence_error_spearman": 0.19999999999999998,
         "insufficient_rate": 0.0
       },
-      "overall_fit_score": {
+      "overall_fit": {
         "confidence_error_spearman": -0.6000000000000001,
         "insufficient_rate": 0.0
       },
@@ -130,11 +130,11 @@
         "confidence_error_spearman": -0.5,
         "insufficient_rate": 0.3333333333333333
       },
-      "interview_readiness_score": {
+      "interview_readiness": {
         "confidence_error_spearman": -0.7999999999999999,
         "insufficient_rate": 0.0
       },
-      "culture_company_alignment_score": {
+      "culture_company_alignment": {
         "confidence_error_spearman": 0.39999999999999997,
         "insufficient_rate": 0.0
       }
@@ -188,7 +188,7 @@
         "confidence_error_spearman": -0.7999999999999999,
         "insufficient_rate": 0.0
       },
-      "overall_fit_score": {
+      "overall_fit": {
         "confidence_error_spearman": -0.39999999999999997,
         "insufficient_rate": 0.0
       },
@@ -200,11 +200,11 @@
         "confidence_error_spearman": -1.0,
         "insufficient_rate": 0.0
       },
-      "interview_readiness_score": {
+      "interview_readiness": {
         "confidence_error_spearman": 0.0,
         "insufficient_rate": 0.0
       },
-      "culture_company_alignment_score": {
+      "culture_company_alignment": {
         "confidence_error_spearman": 1.0,
         "insufficient_rate": 0.0
       }
