@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""`export` stage (specs §4): ONNX export of the finetuned JevModel plus dynamic int8
-quantization, and the bundle the browser app loads.
+"""`export` stage (specs §4): ONNX export of the finetuned JevModel plus int8
+quantization (`quantize_onnx`), and the bundle the browser app loads.
 
 The graph takes `input_ids`, `segment_ids`, `answer_positions` and `candidate_ids` and
 returns `answer_logits`; it builds the block-diagonal mask itself, so it answers any
@@ -14,7 +14,7 @@ Usage:
 
 Reads <runs-dir>/<candidate>/checkpoints/finetune/, writes under <runs-dir>/<candidate>/export/:
     model.onnx    fp32 ONNX (weights in model.onnx_data)
-    quantized/    model_quantized.onnx, dynamic int8
+    quantized/    model_quantized.onnx, int8 (see `quantize_onnx`)
     web/          transformers.js layout: tokenizer + config files, onnx/model_quantized.onnx,
                   calibration.json and parity.json (a sample state with JobFit's questions
                   plus one choice and one noul question: its encoding, answer logits and
@@ -59,6 +59,73 @@ def export_onnx(model, cache, path):
     onnx.save_model(onnx.load(str(raw / path.name)), str(path), save_as_external_data=True,
                     all_tensors_to_one_file=True, location=f"{path.name}_data")
     shutil.rmtree(raw)
+
+
+def matmul_names(path):
+    """(weight, activation) MatMul names of an ONNX graph: those whose B operand is an
+    initializer, and the rest (attention scores, rotary angles)."""
+    import onnx
+
+    graph = onnx.load(str(path), load_external_data=False).graph
+    initializers = {i.name for i in graph.initializer}
+    matmuls = [n for n in graph.node if n.op_type == "MatMul"]
+    return ([n.name for n in matmuls if n.input[1] in initializers],
+            [n.name for n in matmuls if n.input[1] not in initializers])
+
+
+def dequantize_weights(model, names):
+    """Stores each named MatMul's weight as int8 (symmetric, per output channel) behind a
+    DequantizeLinear node: the weight is small on disk, the activations stay fp32."""
+    import numpy as np
+    from onnx import helper, numpy_helper
+
+    graph = model.graph
+    weights = {i.name: i for i in graph.initializer}
+    nodes = []
+    for node in graph.node:
+        if node.name in names:
+            weight = numpy_helper.to_array(weights[node.input[1]])
+            scale = np.maximum(np.abs(weight).max(axis=0), 1e-8) / 127
+            key = node.name.strip("/").replace("/", "_")
+            graph.initializer.extend([
+                numpy_helper.from_array(np.clip(np.round(weight / scale), -127, 127).astype(np.int8), f"{key}_int8"),
+                numpy_helper.from_array(scale.astype(np.float32), f"{key}_scale")])
+            nodes.append(helper.make_node("DequantizeLinear", [f"{key}_int8", f"{key}_scale"], [f"{key}_weight"], axis=1))
+            graph.initializer.remove(weights[node.input[1]])
+            node.input[1] = f"{key}_weight"
+        nodes.append(node)
+    del graph.node[:]
+    graph.node.extend(nodes)
+
+
+def quantize_onnx(export_dir, quantized_dir):
+    """int8 `export_dir/model.onnx` -> `quantized_dir/model_quantized.onnx`. Dynamic int8
+    for every weight MatMul except `down_proj`, whose inputs are outlier-heavy: its weight
+    is int8 but its activations stay fp32. The activation-by-activation MatMuls (attention
+    scores, rotary angles) stay fp32 too; quantizing either set collapses the answers
+    (measured: MAE 0.29 vs 0.13 on Qwen3-0.6B)."""
+    import onnx
+    from optimum.onnxruntime import ORTQuantizer
+    from optimum.onnxruntime.configuration import AutoQuantizationConfig
+
+    weight_names, activation_names = matmul_names(export_dir / "model.onnx")
+    down_proj = {n for n in weight_names if "/down_proj/" in n}
+    ORTQuantizer.from_pretrained(export_dir, file_name="model.onnx").quantize(
+        save_dir=quantized_dir, quantization_config=AutoQuantizationConfig.avx2(
+            is_static=False, per_channel=False, nodes_to_exclude=[*activation_names, *down_proj]))
+    path = quantized_dir / "model_quantized.onnx"
+    model = onnx.load(str(path))
+    dequantize_weights(model, down_proj)
+    onnx.save(model, str(path))
+
+
+def logit_error(reference, session, cache, n=8):
+    """Mean |answer logit| difference of two ONNX sessions on the first `n` pairs of `cache`."""
+    import numpy as np
+
+    head = {**cache, "pairs": cache["pairs"][:n], **{name: cache[name][:n] for name in common.MODEL_INPUTS}}
+    a, b = (common.predict_answer_logits(s, head, n) for s in (reference, session))
+    return float(np.abs(a - b).mean())
 
 
 def refit_calibration(session, args):
@@ -113,8 +180,6 @@ def parity_fixture(session, tokenizer, pair, dataset_dir, calibration):
 def _run(args):
     import mlflow
     import onnxruntime
-    from optimum.onnxruntime import ORTQuantizer
-    from optimum.onnxruntime.configuration import AutoQuantizationConfig
 
     checkpoint_dir = args.run_dir / "checkpoints" / "finetune"
     if not checkpoint_dir.is_dir():
@@ -133,11 +198,9 @@ def _run(args):
     model.lm.config.save_pretrained(export_dir)
     print(f"exported fp32 ONNX -> {export_dir}")
 
-    quantizer = ORTQuantizer.from_pretrained(export_dir, file_name="model.onnx")
-    quantizer.quantize(save_dir=quantized_dir,
-                       quantization_config=AutoQuantizationConfig.avx2(is_static=False, per_channel=False))
+    quantize_onnx(export_dir, quantized_dir)
     session = onnxruntime.InferenceSession(str(quantized_dir / "model_quantized.onnx"))
-    print(f"quantized (dynamic int8) -> {quantized_dir}")
+    print(f"quantized (int8) -> {quantized_dir}")
 
     (web_dir / "onnx").mkdir(parents=True)
     tokenizer.save_pretrained(web_dir)
@@ -153,6 +216,8 @@ def _run(args):
         mlflow.log_metrics({
             "onnx_fp32_bytes": common.onnx_bytes(export_dir),
             "onnx_quantized_bytes": common.onnx_bytes(quantized_dir),
+            "quantized_logit_error": logit_error(onnxruntime.InferenceSession(str(export_dir / "model.onnx")),
+                                                 session, train_cache),
         })
         common.log_model_signature(session, train_cache)
 
