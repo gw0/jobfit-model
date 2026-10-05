@@ -59,9 +59,13 @@ def format_finding(finding, text):
 
 
 def scan_paths(paths, threshold=DEFAULT_THRESHOLD, spacy_model=DEFAULT_SPACY_MODEL):
-    """Scans each file, printing any findings. Returns True if every file is clean."""
+    """Scans each file, or each .md under each directory, printing any findings.
+    Returns True if everything is clean."""
     clean = True
     for path in paths:
+        if Path(path).is_dir():
+            clean &= scan_paths(sorted(Path(path).rglob("*.md")), threshold, spacy_model)
+            continue
         text = Path(path).read_text(encoding="utf-8")
         findings = scrub_text(text, threshold=threshold, spacy_model=spacy_model)
         if findings:
@@ -79,9 +83,8 @@ def main():
     parser.add_argument("--spacy-model", default=DEFAULT_SPACY_MODEL)
     args = parser.parse_args()
 
-    files = [args.path] if args.path.is_file() else sorted(args.path.rglob("*.md"))
-    clean = scan_paths(files, threshold=args.threshold, spacy_model=args.spacy_model)
-    print(f"scanned {len(files)} file(s): {'clean' if clean else 'PII found'}")
+    clean = scan_paths([args.path], threshold=args.threshold, spacy_model=args.spacy_model)
+    print("clean" if clean else "PII found")
     sys.exit(0 if clean else 1)
 
 

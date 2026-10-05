@@ -1,4 +1,4 @@
-"""Reading and writing the dataset corpus (`<dataset-dir>/{cvs,jobs,labels,splits}`).
+"""Reading and writing the dataset corpus (`<datasets-dir>/{cvs,jobs,labels,splits}`).
 
 Stdlib only: imported by the data/ scripts, data/fetch_jobs/ and pipeline/.
 Documents are addressed by path-id relative to the dataset dir, e.g.
@@ -10,7 +10,6 @@ import re
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_DATASET_DIR = REPO_ROOT / "datasets"
 SPLIT_NAMES = ("train", "val", "calib", "test")
 
 
@@ -37,9 +36,9 @@ def write_jsonl(path, records):
             f.write(json.dumps(record, allow_nan=False) + "\n")
 
 
-def load_splits(dataset_dir):
+def load_splits(datasets_dir):
     """{split_name: [{"cv": ..., "job": ...}, ...]}, empty list for a missing split."""
-    return {name: load_jsonl(Path(dataset_dir) / "splits" / f"{name}.jsonl") for name in SPLIT_NAMES}
+    return {name: load_jsonl(Path(datasets_dir) / "splits" / f"{name}.jsonl") for name in SPLIT_NAMES}
 
 
 def slugify(text):
@@ -78,14 +77,14 @@ def company_of(job_id):
     return job_id.split("/")[1]
 
 
-def list_cvs(dataset_dir):
-    cvs_dir = Path(dataset_dir) / "cvs"
+def list_cvs(datasets_dir):
+    cvs_dir = Path(datasets_dir) / "cvs"
     return sorted(f"cvs/{p.name}" for p in cvs_dir.glob("*.md")) if cvs_dir.is_dir() else []
 
 
-def list_jobs(dataset_dir):
+def list_jobs(datasets_dir):
     """{company: [job path-ids]}, companies with no posts omitted."""
-    jobs_root = Path(dataset_dir) / "jobs"
+    jobs_root = Path(datasets_dir) / "jobs"
     jobs_by_company = {}
     if jobs_root.is_dir():
         for company_dir in sorted(p for p in jobs_root.iterdir() if p.is_dir()):

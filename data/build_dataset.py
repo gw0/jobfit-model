@@ -98,7 +98,7 @@ def make_splits(cv_ids, jobs_by_company, seed=DEFAULT_SEED, cv_ratios=DEFAULT_CV
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--out-dir", type=Path, default=corpus.DEFAULT_DATASET_DIR)
+    parser.add_argument("--out-dir", type=Path, required=True)
     parser.add_argument("--jobs-per-cv", type=int, default=None, help="sample this many jobs per CV (default: all)")
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
     args = parser.parse_args()

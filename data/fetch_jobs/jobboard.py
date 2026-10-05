@@ -16,9 +16,8 @@ from markdownify import markdownify
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "data"))
-from corpus import DEFAULT_DATASET_DIR, format_frontmatter, parse_frontmatter, slugify  # noqa: E402
+from corpus import format_frontmatter, parse_frontmatter, slugify  # noqa: E402
 
-JOBS_ROOT = DEFAULT_DATASET_DIR / "jobs"
 FRONTMATTER_KEYS = ("company", "title", "location", "url", "posted_at")
 
 EMAIL_RE = re.compile(r"[\w.%+-]+@[\w-]+(?:\.[\w-]+)+")
@@ -98,13 +97,12 @@ def redact_emails(text):
     return EMAIL_RE.sub(REDACTED_EMAIL, text)
 
 
-def write_post(post, jobs_root=None):
+def write_post(post, jobs_root):
     """Write one normalized post dict to jobs/<company-slug>/, deduping by url.
 
     post: {title, company, location, url, posted_at, description}
     Returns (path, is_new).
     """
-    jobs_root = jobs_root or JOBS_ROOT
     folder = jobs_root / slugify(post.get("company"))
     folder.mkdir(parents=True, exist_ok=True)
 
@@ -205,8 +203,8 @@ def parse_cli(*, target=False, sector=False, count=False):
                          help="comma-separated list of title keywords to exclude")
     parser.add_argument("--location", choices=list(LOCATION_PATTERNS.keys()), default=None)
     parser.add_argument(
-        "--out-dir", type=Path, default=JOBS_ROOT,
-        help="directory to write jobs/<company>/<file>.md into (default: datasets/jobs)",
+        "--out-dir", type=Path, required=True,
+        help="directory to write jobs/<company>/<file>.md into (datasets_<scale>/jobs)",
     )
     if target:
         parser.add_argument("target", help="org/board slug (or careers URL for workday)")
@@ -220,7 +218,7 @@ def parse_cli(*, target=False, sector=False, count=False):
     return parser.parse_args()
 
 
-def save_posts(posts, location=None, out_dir=None, limit=None):
+def save_posts(posts, out_dir, location=None, limit=None):
     """Apply location filtering, write up to `limit` matching posts, and print a
     one-line summary.
 

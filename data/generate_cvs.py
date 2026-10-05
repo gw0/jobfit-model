@@ -123,7 +123,7 @@ def write_cv(out_dir, slug, markdown):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--count", type=int, required=True, help="number of CVs to generate")
-    parser.add_argument("--out-dir", type=Path, default=corpus.DEFAULT_DATASET_DIR)
+    parser.add_argument("--out-dir", type=Path, required=True)
     parser.add_argument("--workers", type=int, default=1, help="parallel `claude` calls")
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
     parser.add_argument("--skip-scrub", action="store_true", help="skip the Presidio PII scan")
