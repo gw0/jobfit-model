@@ -7,14 +7,14 @@
 // Runs on onnxruntime-node (device "cpu"); browsers use the wasm/webgpu providers,
 // which only a real browser can exercise.
 //
-// Usage: node scripts/verify-parity.mjs [model-dir]   (default: public/models/smollm2-135m-instruct)
+// Usage: node scripts/verify-parity.mjs [model-dir]   (default: public/models/default)
 import { readFileSync } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
 import { AutoTokenizer, env, PreTrainedModel, Tensor } from "@huggingface/transformers";
 import { answers, candidateIds, encode, MAX_CANDIDATES } from "../src/jev.mjs";
 import { STATE_BUDGET } from "../src/jobfit.mjs";
 
-const modelDir = resolve(process.argv[2] ?? new URL("../public/models/smollm2-135m-instruct", import.meta.url).pathname);
+const modelDir = resolve(process.argv[2] ?? new URL("../public/models/default", import.meta.url).pathname);
 env.allowRemoteModels = false;
 env.allowLocalModels = true;
 env.localModelPath = dirname(modelDir) + "/";

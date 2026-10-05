@@ -141,15 +141,15 @@ local-publish: local-export
 
 # --- frontend --------------------------------------------------------------------------
 
-# Serves a pipeline export locally at /models/$(CANDIDATE)/ (frontend/public/models is gitignored).
+# Serves a pipeline export locally at /models/default/ (frontend/public/models is gitignored).
 copy-model:
-	rm -rf frontend/public/models/$(CANDIDATE)
+	rm -rf frontend/public/models/default
 	mkdir -p frontend/public/models
-	cp -r $(RUNS)/$(CANDIDATE)/export/web frontend/public/models/$(CANDIDATE)
+	cp -r $(RUNS)/$(CANDIDATE)/export/web frontend/public/models/default
 
 frontend-check: local-export copy-model build
 	cd frontend && $(NPM) install
-	node frontend/scripts/verify-parity.mjs frontend/public/models/$(CANDIDATE)
+	node frontend/scripts/verify-parity.mjs frontend/public/models/default
 	docker run --rm -d --name $(FRONTEND_CHECK_NAME) jobfit-frontend
 	for i in 1 2 3 4 5; do \
 		docker exec $(FRONTEND_CHECK_NAME) wget -qO /dev/null http://127.0.0.1:8080/ && status=0 && break; \
