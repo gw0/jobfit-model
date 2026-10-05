@@ -1,18 +1,17 @@
 #!/usr/bin/env bash
 # Builds the SPA and deploys it to an HF Space (Static SDK), the primary deployment
-# target (specs §7). JOBFIT_MODEL_URL must be the base URL of the model repo pushed by
-# `pipeline/publish.py --push-hf`: the repo ships no weights, so the deployed app
-# loads them from there.
+# target (specs §7). The repo ships no weights, so the deployed app loads them from the
+# model repo pushed by `pipeline/publish.py --push-hf`: JOBFIT_MODEL_URL, by default
+# main of HF_MODEL_REPO (default gw0/jobfit-model).
 #
 # Usage:
-#   HF_TOKEN=hf_... HF_SPACE_REPO=<user-or-org>/jobfit \
-#   JOBFIT_MODEL_URL=https://huggingface.co/<user-or-org>/jobfit-smollm2-135m-instruct/resolve/<revision> \
-#   frontend/scripts/deploy-hf.sh
+#   HF_TOKEN=hf_... HF_SPACE_REPO=<user-or-org>/jobfit [HF_MODEL_REPO=<user-or-org>/<name>] \
+#   frontend/scripts/push-hf-frontend.sh
 set -euo pipefail
 
 : "${HF_TOKEN:?set HF_TOKEN to a real HF Hub API token with write access}"
 : "${HF_SPACE_REPO:?set HF_SPACE_REPO to <user-or-org>/<space-name>}"
-: "${JOBFIT_MODEL_URL:?set JOBFIT_MODEL_URL to the base URL of the model files}"
+JOBFIT_MODEL_URL="${JOBFIT_MODEL_URL:-https://huggingface.co/${HF_MODEL_REPO:-gw0/jobfit-model}/resolve/main}"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 FRONTEND_DIR="$REPO_ROOT/frontend"

@@ -68,19 +68,16 @@ def test_render_markdown_calibration_mean():
     assert "temperature 1.5000" in md and "n/a" in md  # stages without results
 
 
-def test_hf_repo_id_and_model_card():
-    assert publish.hf_repo_id("smollm2-135m-instruct", "jobfit") == "jobfit/jobfit-smollm2-135m-instruct"
-    assert publish.hf_repo_id("smollm2-135m-instruct", "jobfit", "me/custom") == "me/custom"
-
+def test_model_card():
     built = report.assemble_report("smollm2-135m-instruct", "HuggingFaceTB/SmolLM2-135M-Instruct", "abc123",
                                    {"quantized": _eval_result(0.2, 0.25, 12)}, None, {})
-    card = publish.build_model_card(built, "jobfit/jobfit-smollm2-135m-instruct")
+    card = publish.build_model_card(built, "gw0/jobfit-model")
     assert card.startswith("---\n") and "license: apache-2.0" in card
     assert "abc123" in card and "12/17 questions" in card
 
     built = report.assemble_report("minicpm5-2b", "openbmb/MiniCPM5-2B", "abc123",
                                    {"quantized": _eval_result(0.2, 0.25, 12)}, None, {})
-    card = publish.build_model_card(built, "jobfit/jobfit-minicpm5-2b")
+    card = publish.build_model_card(built, "gw0/jobfit-model")
     assert "license: other" in card and "verify before use" in card
 
 
@@ -90,4 +87,4 @@ def test_variant_candidate_reports_its_config_and_base_licence(tmp_path):
     built = publish.build_report(tmp_path, "smollm2-135m-instruct-r16", publish.load_candidates(tmp_path), "abc123")
     assert built["candidate"] == "smollm2-135m-instruct-r16" and built["config"] == {"finetune": {"lora_rank": 16}}
     assert "- finetune: lora_rank=16" in report.render_markdown(built)
-    assert "license: apache-2.0" in publish.build_model_card(built, "jobfit/jobfit-smollm2-135m-instruct-r16")
+    assert "license: apache-2.0" in publish.build_model_card(built, "gw0/jobfit-model")

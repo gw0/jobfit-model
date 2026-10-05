@@ -5,7 +5,7 @@ the winner), and optionally push the winner to the HF Hub and the report to W&B.
 
 Usage:
     ./pipeline/publish.py --runs-dir runs_smoke --model HuggingFaceTB/SmolLM2-135M-Instruct
-    HF_TOKEN=... ./pipeline/publish.py --runs-dir runs_smoke --push-hf --hf-org <org>
+    HF_TOKEN=... ./pipeline/publish.py --runs-dir runs_smoke --push-hf [--hf-repo <org>/<name>]
     WANDB_API_KEY=... ./pipeline/publish.py --runs-dir runs_smoke --push-wandb
 
 Reads <runs-dir>/*/eval/<stage>.json and <runs-dir>/<candidate>/{config.json,export/web/},
@@ -94,10 +94,6 @@ def register(run_id, candidate, winner):
 
 
 # --- HF Hub ----------------------------------------------------------------------------
-
-def hf_repo_id(candidate, hf_org, override=None):
-    return override or f"{hf_org}/jobfit-{candidate}"
-
 
 def build_model_card(report, repo_id):
     licence = BASE_MODEL_LICENSES.get(common.model_slug(report["model"]))
@@ -196,7 +192,7 @@ def _run(args):
     if args.push_hf:
         winner_report = report if winner == args.candidate else build_report(args.runs_dir, winner, candidates, report["git_sha"])
         push_hf(winner_report, args.runs_dir / winner / "export" / "web",
-                hf_repo_id(winner, args.hf_org, args.hf_repo), args.hf_private)
+                args.hf_repo, args.hf_private)
     if args.push_wandb:
         push_wandb(report, report_paths, args.wandb_project)
 
@@ -204,9 +200,9 @@ def _run(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     common.add_common_args(parser)
-    parser.add_argument("--push-hf", action="store_true", help="push the winner's bundle; needs HF_TOKEN")
-    parser.add_argument("--hf-org", default="jobfit")
-    parser.add_argument("--hf-repo", default=None, help="full repo id, overrides <hf-org>/jobfit-<candidate>")
+    parser.add_argument("--push-hf", action="store_true", help="push the winner's bundle to main; needs HF_TOKEN")
+    parser.add_argument("--hf-repo", default=os.environ.get("HF_MODEL_REPO", "gw0/jobfit-model"),
+                        help="model repo id (default: $HF_MODEL_REPO, else gw0/jobfit-model)")
     parser.add_argument("--hf-private", action="store_true")
     parser.add_argument("--push-wandb", action="store_true", help="needs WANDB_API_KEY")
     parser.add_argument("--wandb-project", default="jobfit")

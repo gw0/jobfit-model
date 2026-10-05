@@ -19,7 +19,7 @@
 	local-prepare local-zeroshot local-finetune local-calibrate local-export local-publish \
 	copy-model frontend-check \
 	cluster-up cluster-secrets cluster-down cluster-check cluster-logs cluster-mlflow cluster-run \
-	publish-hf deploy-hf
+	push-hf-model push-hf-frontend push-wandb-report
 
 VENV ?= .venv/bin
 PY ?= $(VENV)/python
@@ -273,11 +273,16 @@ cluster-run: build
 		 curl -sf http://otel-collector.jobfit.svc.cluster.local:8889/metrics | grep -q gpu_utilization_percent'
 	echo "report: $(RUNS)/$(CANDIDATE)/reports/report.md"
 
-# --- publishing (needs HF_TOKEN, a write token, in .env.publish) -----------------------
+# --- publishing: .env.publish holds HF_TOKEN (write), HF_SPACE_REPO, optionally HF_MODEL_REPO
+# (default gw0/jobfit-model) and, for the W&B report, WANDB_API_KEY ----------------------
 
-publish-hf:
-	set -a; . ./.env.publish; set +a; \
-		./pipeline/publish.py --runs-dir $(RUNS) --model $(MODEL) --candidate $(CANDIDATE) --push-hf
+PUBLISH := set -a; . ./.env.publish; set +a;
 
-deploy-hf:
-	set -a; . ./.env.publish; set +a; frontend/scripts/deploy-hf.sh
+push-hf-model:
+	$(PUBLISH) ./pipeline/publish.py --runs-dir $(RUNS) --model $(MODEL) --candidate $(CANDIDATE) --push-hf
+
+push-hf-frontend:
+	$(PUBLISH) frontend/scripts/push-hf-frontend.sh
+
+push-wandb-report:
+	$(PUBLISH) ./pipeline/publish.py --runs-dir $(RUNS) --model $(MODEL) --candidate $(CANDIDATE) --push-wandb
