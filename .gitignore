@@ -27,12 +27,8 @@ dist/
 *.gguf
 models/
 
-# Local datasets and runs symlinks
-/runs
-/datasets
-
 # Pipeline output (keep reports only)
-runs_smoke/*
-!runs_smoke/*/
-runs_smoke/*/*
-!runs_smoke/*/reports/
+runs_*/*
+!runs_*/*/
+runs_*/*/*
+!runs_*/*/reports/

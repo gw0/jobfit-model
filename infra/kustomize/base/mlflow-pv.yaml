@@ -1,6 +1,7 @@
 # hostPath-backed PV (specs §7) -- a single-node cluster means every pod already
 # shares one host, so object storage (S3/MinIO) would solve a multi-node problem this
-# project doesn't have. Path matches infra/kind-config.yaml's extraMounts containerPath.
+# project doesn't have. Path is a subdirectory of the `runs` extraMount in
+# infra/kind-config.yaml, so each scale's MLflow store lives in its runs_<SCALE>/mlflow/.
 apiVersion: v1
 kind: PersistentVolume
 metadata:
@@ -14,5 +15,5 @@ spec:
     - ReadWriteOnce
   persistentVolumeReclaimPolicy: Retain
   hostPath:
-    path: /mnt/mlflow-data
+    path: /mnt/runs/mlflow
     type: DirectoryOrCreate

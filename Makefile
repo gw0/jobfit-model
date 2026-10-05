@@ -159,11 +159,11 @@ frontend-check: local-export copy-model build
 	docker stop $(FRONTEND_CHECK_NAME); exit $$status
 
 # --- cluster (KinD + Argo + MLflow + OTel collector) ------------------------------------
-# kind-config.yaml mounts ./datasets and ./runs when the cluster is created, so link them
-# to the scale first (`ln -sfn datasets_full datasets; ln -sfn runs_full runs`), then
-# `make cluster-up [GPU=1]` and one `make cluster-run SCALE=... CANDIDATE=...` per
-# candidate. The committed runs_*/<candidate>/reports/ is the durable cross-host
-# comparison; MLflow's hostPath store is not.
+# kind-config.yaml mounts $(DATASET) and $(RUNS) when the cluster is created, so
+# `make cluster-up SCALE=... [GPU=1]` fixes the scale, then one
+# `make cluster-run SCALE=... CANDIDATE=...` per candidate (same SCALE). The committed
+# runs_*/<candidate>/reports/ is the durable cross-host comparison; MLflow's store,
+# $(RUNS)/mlflow/ (local runs use $(RUNS)/mlflow-local/), is not.
 
 # Two checkouts of this repo on the same host must not collide: derive a short hash from
 # the checkout path and use it for the cluster name and every host port/name below, so
@@ -186,8 +186,8 @@ export KUBECONFIG := $(CURDIR)/$(KIND_DIR)/kubeconfig.yaml
 # its address on every ':' inside EXEC:"...", hence the "\:" escapes.
 # GPU=1 also readies the node's containerd and the NVIDIA device plugin (infra/gpu/).
 cluster-up:
-	mkdir -p $(KIND_DIR)/mlflow-data .cache
-	kind create cluster --name $(KIND_CLUSTER) --config infra/kind-config.yaml
+	mkdir -p $(RUNS)/mlflow .cache
+	sed 's#@DATASET@#$(DATASET)#; s#@RUNS@#$(RUNS)#' infra/kind-config.yaml | kind create cluster --name $(KIND_CLUSTER) --config -
 	kind get kubeconfig --name $(KIND_CLUSTER) | sed 's#server: https://127.0.0.1:[0-9]*#server: https://127.0.0.1:$(TUNNEL_PORT)#' > $(KIND_DIR)/kubeconfig.yaml
 	socat TCP-LISTEN:$(TUNNEL_PORT),fork,reuseaddr EXEC:"docker run --rm -i --network kind alpine/socat - TCP\:$(KIND_CLUSTER)-control-plane\:6443" & echo $$! > $(KIND_DIR)/tunnel.pid
 	until kubectl get nodes >/dev/null 2>&1; do sleep 2; done  # API server/tunnel warm-up
@@ -239,8 +239,8 @@ cluster-mlflow:
 	MLFLOW_TRACKING_URI=http://localhost:$(MLFLOW_PORT) $(PY) -c "import mlflow; df = mlflow.search_runs(experiment_names=['jobfit-pipeline'], order_by=['start_time DESC'], max_results=$(MLFLOW_RUNS)); cols=['tags.mlflow.runName','status','start_time']+[c for c in df.columns if c.startswith('metrics.')]; print(df[cols].rename(columns=lambda c: c.split('.')[-1]).to_string(index=False)) if not df.empty else print('no runs yet')"
 
 # Submits one workflow for $(CANDIDATE) and waits for it; expects `make cluster-up` done
-# with ./datasets and ./runs linked to this scale (checked -- the cluster mounted
-# whatever they pointed at then). Hyperparameters beyond the defaults go in as workflow
+# at this same SCALE (the cluster mounted $(DATASET) and $(RUNS) then).
+# Hyperparameters beyond the defaults go in as workflow
 # parameters, e.g. ARGO_PARAMS="-p lora-rank=16" CANDIDATE=smollm2-135m-instruct-r16.
 # Polls the workflow phase rather than `argo submit --watch`: one long-lived stream over
 # the socat tunnel is fragile across a run of hours.
@@ -248,8 +248,6 @@ ARGO_PARAMS ?=
 RUN_TIMEOUT_MIN ?= 1440
 cluster-run: build
 	kubectl get nodes >/dev/null 2>&1 || { echo "cluster-run: no cluster up -- run 'make cluster-up' first" >&2; exit 1; }
-	[ "$$(readlink datasets)" = $(DATASET) ] && [ "$$(readlink runs)" = $(RUNS) ] || \
-		{ echo "cluster-run: ./datasets and ./runs must link to $(DATASET) and $(RUNS) before cluster-up" >&2; exit 1; }
 	kind load docker-image jobfit-pipeline:latest --name $(KIND_CLUSTER)
 	WF=$$(argo submit -n jobfit pipeline/workflow.yaml --generate-name jobfit-$(subst .,-,$(CANDIDATE))- \
 		-p model=$(MODEL) -p candidate=$(CANDIDATE) -p gpus=$(GPU) $(ARGO_PARAMS) -o json \

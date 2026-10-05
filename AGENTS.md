@@ -24,9 +24,9 @@ Commands (see README.md for details):
 - `data/generate_cvs.py` and `data/label_dataset.py` shell out to the `claude` CLI. A
   nested call from inside a Claude Code session does not inherit this session's auth,
   so running them from here will fail or hang.
-- `datasets/` and `runs/` are symlinks to one committed scale (`datasets_smoke/`/`runs_smoke/`
-  or `datasets_full/`/`runs_full/`). Don't overwrite or relabel either corpus in place —
-  relabeling re-spends real LLM-judge calls.
+- `datasets_<SCALE>/` and `runs_<SCALE>/` (smoke, full; either may be a symlink) are the
+  committed corpora and outputs, always addressed by those names. Don't overwrite or
+  relabel either corpus in place — relabeling re-spends real LLM-judge calls.
 - `pipeline/requirements.txt` pins `onnxruntime` to match the version bundled by
   `@huggingface/transformers` in `frontend/`; don't bump one without the other.
 - `data/fetch_jobs/*.py` must never spoof a browser User-Agent — `make test` greps for

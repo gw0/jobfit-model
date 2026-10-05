@@ -8,19 +8,15 @@ apiVersion: kind.x-k8s.io/v1alpha4
 nodes:
   - role: control-plane
     extraMounts:
-      # hostPath source for MLflow's artifact/tracking PV (specs §7) -- bind-mounted
-      # into the node so infra/kustomize/base/mlflow-pv.yaml's hostPath resolves inside
-      # the KinD node's filesystem, not the host's.
-      - hostPath: ./.kind/mlflow-data
-        containerPath: /mnt/mlflow-data
-      # hostPath source for pipeline/workflow.yaml's `dataset` volume -- point this at
-      # a real datasets/ (or datasets_smoke/) checkout before `kind create cluster`.
-      - hostPath: ./datasets
+      # hostPath source for pipeline/workflow.yaml's `dataset` volume -- `make cluster-up`
+      # substitutes datasets_<SCALE> for @DATASET@ before `kind create cluster`.
+      - hostPath: ./@DATASET@
         containerPath: /mnt/dataset
       # hostPath source for pipeline/workflow.yaml's `runs` volume -- separate from
       # `dataset` above so pipeline output never gets mixed into the committed corpus
-      # checkout. Point this at ./runs (or ./runs_smoke).
-      - hostPath: ./runs
+      # checkout. @RUNS@ becomes runs_<SCALE> likewise. MLflow's store (specs §7) is its
+      # mlflow/ subdirectory (see infra/kustomize/base/mlflow-pv.yaml).
+      - hostPath: ./@RUNS@
         containerPath: /mnt/runs
       # hostPath source for pipeline/workflow.yaml's `cache` volume -- shared with the
       # local Docker smoke path's `.cache` mount (Makefile) so downloaded weights are
