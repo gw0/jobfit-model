@@ -5,7 +5,7 @@ and JobFit's one "insufficient data" confidence threshold. Inference only; the w
 hash is asserted unchanged.
 
 Usage:
-    ./pipeline/calibrate.py --dataset-dir datasets_smoke --runs-dir runs_smoke
+    ./pipeline/calibrate.py --datasets-dir datasets_smoke --runs-dir runs_smoke
 
 Writes <runs-dir>/<candidate>/calibration/params.json: {"temperature", "confidence_threshold"},
 both null when `calib` is empty.
@@ -38,7 +38,7 @@ def _run(args):
     if common.state_dict_hash(model) != hash_before:
         raise SystemExit("WEIGHT HASH CHANGED during calibrate -- inference must not touch weights")
 
-    targets, confidences = common.build_targets(calib_cache["pairs"], common.load_labels(args.dataset_dir))
+    targets, confidences = common.build_targets(calib_cache["pairs"], common.load_labels(args.datasets_dir))
     params = metrics.fit_calibration(answer_logits, targets, confidences, args.confidence_floor)
     common.write_json(out_path, params)
     print(f"fit calibration on {len(calib_cache['pairs'])} calib pair(s) -> {out_path}: {params}")

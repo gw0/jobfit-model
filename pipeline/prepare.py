@@ -8,7 +8,7 @@ caches the tensors. `test` additionally gets a `test_shuffled` cache for the
 shuffled-pair control: each test CV paired with a job it is not paired with.
 
 Usage:
-    ./pipeline/prepare.py --dataset-dir datasets_smoke --runs-dir runs_smoke
+    ./pipeline/prepare.py --datasets-dir datasets_smoke --runs-dir runs_smoke
 
 Writes <runs-dir>/<candidate>/cache/{train,val,calib,test,test_shuffled}.pt.
 """
@@ -57,12 +57,12 @@ def derange_pairs(pairs, all_job_ids, seed=42):
     return shuffled
 
 
-def _cache_split(tokenizer, dataset_dir, run_dir, name, pairs):
+def _cache_split(tokenizer, datasets_dir, run_dir, name, pairs):
     import torch
 
     rows = [
-        jev.encode(tokenizer, common.jobfit_state((dataset_dir / p["cv"]).read_text(encoding="utf-8"),
-                                           corpus.read_job_body(dataset_dir / p["job"])),
+        jev.encode(tokenizer, common.jobfit_state((datasets_dir / p["cv"]).read_text(encoding="utf-8"),
+                                           corpus.read_job_body(datasets_dir / p["job"])),
                    common.QUESTIONS, common.STATE_BUDGET, common.QUESTIONS_BUDGET, tokenizer.pad_token_id)
         for p in pairs
     ]
@@ -79,10 +79,10 @@ def _cache_split(tokenizer, dataset_dir, run_dir, name, pairs):
     print(f"{name}: {n} pair(s) -> {path} (state truncated {sum(r['truncated'] for r in rows)}/{n})")
 
 
-def _pii_scan(dataset_dir):
+def _pii_scan(datasets_dir):
     import pii_scrub
 
-    return pii_scrub.scan_paths(sorted(dataset_dir.rglob("*.md")))
+    return pii_scrub.scan_paths([datasets_dir / "cvs", datasets_dir / "jobs"])
 
 
 def main():
@@ -91,16 +91,16 @@ def main():
     args = common.parse_args(parser, "prepare")
 
     with common.stage_span("prepare"):
-        splits = corpus.load_splits(args.dataset_dir)
+        splits = corpus.load_splits(args.datasets_dir)
         if not any(splits.values()):
-            raise SystemExit(f"no splits found under {args.dataset_dir / 'splits'}")
+            raise SystemExit(f"no splits found under {args.datasets_dir / 'splits'}")
         try:
             assert_leakage_free(splits)
         except LeakageError as exc:
             raise SystemExit(f"LEAKAGE CHECK FAILED: {exc}")
         print("leakage check passed: train/test disjoint on both CV and company axes")
 
-        if not _pii_scan(args.dataset_dir):
+        if not _pii_scan(args.datasets_dir):
             raise SystemExit("PII CHECK FAILED: see findings above")
         print("PII scan passed: no findings")
 
@@ -110,11 +110,11 @@ def main():
         print(f"questions block: {questions_len}/{common.QUESTIONS_BUDGET} tokens")
         for name, pairs in splits.items():
             if pairs:
-                _cache_split(tokenizer, args.dataset_dir, args.run_dir, name, pairs)
+                _cache_split(tokenizer, args.datasets_dir, args.run_dir, name, pairs)
         if splits["test"]:
-            all_jobs = [job for jobs in corpus.list_jobs(args.dataset_dir).values() for job in jobs]
+            all_jobs = [job for jobs in corpus.list_jobs(args.datasets_dir).values() for job in jobs]
             shuffled = derange_pairs(splits["test"], all_jobs, seed=args.seed)
-            _cache_split(tokenizer, args.dataset_dir, args.run_dir, "test_shuffled", shuffled)
+            _cache_split(tokenizer, args.datasets_dir, args.run_dir, "test_shuffled", shuffled)
 
 
 if __name__ == "__main__":

@@ -11,7 +11,7 @@ With a `val` split the best epoch by val loss is kept, otherwise the last one.
 The Trainer logs its loss curve (every 10 steps) to the active MLflow run.
 
 Usage:
-    ./pipeline/train.py --dataset-dir datasets_smoke --runs-dir runs_smoke
+    ./pipeline/train.py --datasets-dir datasets_smoke --runs-dir runs_smoke
 
 Reads <runs-dir>/<candidate>/cache/{train,val}.pt, writes <runs-dir>/<candidate>/checkpoints/finetune/.
 """
@@ -79,7 +79,7 @@ def _run(args):
     if train_cache is None:
         raise SystemExit(f"no train cache under {args.run_dir / 'cache'} -- run prepare.py first")
     val_cache = common.load_cache(args.run_dir, "val")
-    labels = common.load_labels(args.dataset_dir)
+    labels = common.load_labels(args.datasets_dir)
 
     transformers.set_seed(args.seed)
     model, peft_lm, tokenizer = _build_model(args)

@@ -112,7 +112,7 @@ def build_model_card(report, repo_id):
         f"# {repo_id}",
         "",
         "CV/job-description fit-scoring model from the [JobFit](https://github.com/gw0/jobfit-model) "
-        "project; see its `runs/<candidate>/reports/` for the full benchmark report. It is a "
+        "project; see its `runs_<scale>/<candidate>/reports/` for the full benchmark report. It is a "
         "Jev-shaped typed-decision model: a state plus typed questions (score / choice / noul) "
         "in, one typed answer per question out, each read off the causal LM's own `lm_head` "
         "in one masked forward pass.",

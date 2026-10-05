@@ -12,7 +12,7 @@ The model and calibration are chosen by --stage:
     quantized    export/quantized (ONNX) + calibration/params.json (pre-quantization fit)
 
 Usage:
-    ./pipeline/evaluate.py --dataset-dir datasets_smoke --runs-dir runs_smoke --stage finetuned
+    ./pipeline/evaluate.py --datasets-dir datasets_smoke --runs-dir runs_smoke --stage finetuned
 
 Writes <runs-dir>/<candidate>/eval/<stage>.json; an empty split is recorded as skipped.
 """
@@ -50,9 +50,9 @@ def _load_model(stage, path):
     return common.load_jev_model(path).eval()
 
 
-def _overlaps(dataset_dir, pairs):
-    cvs = {p["cv"]: (dataset_dir / p["cv"]).read_text(encoding="utf-8") for p in pairs}
-    jobs = {p["job"]: corpus.read_job_body(dataset_dir / p["job"]) for p in pairs}
+def _overlaps(datasets_dir, pairs):
+    cvs = {p["cv"]: (datasets_dir / p["cv"]).read_text(encoding="utf-8") for p in pairs}
+    jobs = {p["job"]: corpus.read_job_body(datasets_dir / p["job"]) for p in pairs}
     return [metrics.keyword_overlap(cvs[p["cv"]], jobs[p["job"]]) for p in pairs]
 
 
@@ -66,13 +66,13 @@ def shuffle_control(scores, shuffled_scores, targets, confidences, confidence_fl
             for j, qid in enumerate(common.QUESTION_IDS)}
 
 
-def baselines(dataset_dir, train_pairs, eval_pairs, labels, targets, confidences, confidence_floor):
+def baselines(datasets_dir, train_pairs, eval_pairs, labels, targets, confidences, confidence_floor):
     train_targets, train_conf = common.build_targets(train_pairs, labels)
     preds = {
         "train_mean": metrics.train_mean_preds(train_targets, train_conf, confidence_floor, len(eval_pairs)),
         "keyword_overlap": metrics.keyword_overlap_preds(
-            _overlaps(dataset_dir, train_pairs), train_targets, train_conf, confidence_floor,
-            _overlaps(dataset_dir, eval_pairs)),
+            _overlaps(datasets_dir, train_pairs), train_targets, train_conf, confidence_floor,
+            _overlaps(datasets_dir, eval_pairs)),
     }
     return {
         name: {qid: {"mae": m} for qid, m in metrics.per_question_mae(p, targets, confidences, confidence_floor).items()}
@@ -112,7 +112,7 @@ def _run(args):
     scores, answer_confidences = common.read_scores(
         common.predict_answer_logits(model, cache, args.batch_size), temperature)
 
-    labels = common.load_labels(args.dataset_dir)
+    labels = common.load_labels(args.datasets_dir)
     targets, confidences = common.build_targets(cache["pairs"], labels)
     floor = args.confidence_floor
     report_metrics = metrics.compute_metrics(scores, targets, confidences, floor)
@@ -134,7 +134,7 @@ def _run(args):
         "split": args.split, "stage": args.stage, "model": args.model,
         "n": len(cache["pairs"]), "confidence_floor": floor,
         "metrics": report_metrics,
-        "baselines": (baselines(args.dataset_dir, train_cache["pairs"], cache["pairs"], labels,
+        "baselines": (baselines(args.datasets_dir, train_cache["pairs"], cache["pairs"], labels,
                                 targets, confidences, floor) if train_cache is not None else {}),
         "calibration": calibration,
         "bootstrap_mae_ci": metrics.bootstrap_mae_ci(scores, targets, confidences, floor,

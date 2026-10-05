@@ -10,7 +10,7 @@ of the model they actually run. (`evaluate --stage quantized` still reports the
 unchanged pre-quantization fit, so the report shows what quantization cost.)
 
 Usage:
-    ./pipeline/export.py --dataset-dir datasets_smoke --runs-dir runs_smoke
+    ./pipeline/export.py --datasets-dir datasets_smoke --runs-dir runs_smoke
 
 Reads <runs-dir>/<candidate>/checkpoints/finetune/, writes under <runs-dir>/<candidate>/export/:
     model.onnx    fp32 ONNX (weights in model.onnx_data)
@@ -134,7 +134,7 @@ def refit_calibration(session, args):
         print("0 calib pairs -- shipping an empty calibration")
         return {"temperature": math.nan, "confidence_threshold": math.nan}
     answer_logits = common.predict_answer_logits(session, calib_cache, args.batch_size)
-    targets, confidences = common.build_targets(calib_cache["pairs"], common.load_labels(args.dataset_dir))
+    targets, confidences = common.build_targets(calib_cache["pairs"], common.load_labels(args.datasets_dir))
     return metrics.fit_calibration(answer_logits, targets, confidences, args.confidence_floor)
 
 
@@ -146,13 +146,13 @@ def _first_pair(run_dir):
     raise SystemExit("no cached split found -- run prepare.py first")
 
 
-def parity_fixture(session, tokenizer, pair, dataset_dir, calibration):
+def parity_fixture(session, tokenizer, pair, datasets_dir, calibration):
     """One state, encoded and answered, for the frontend to reproduce. The questions
     budget is widened to fit the extra questions; the graph has no fixed length."""
     import numpy as np
 
-    state = common.jobfit_state((dataset_dir / pair["cv"]).read_text(encoding="utf-8"),
-                         corpus.read_job_body(dataset_dir / pair["job"]))
+    state = common.jobfit_state((datasets_dir / pair["cv"]).read_text(encoding="utf-8"),
+                         corpus.read_job_body(datasets_dir / pair["job"]))
     questions = {**common.QUESTIONS, **PARITY_EXTRA_QUESTIONS}
     questions_budget = 2 * common.QUESTIONS_BUDGET
     encoded = jev.encode(tokenizer, state, questions, common.STATE_BUDGET, questions_budget, tokenizer.pad_token_id)
@@ -209,7 +209,7 @@ def _run(args):
     calibration = refit_calibration(session, args)
     common.write_json(web_dir / "calibration.json", calibration)
     common.write_json(web_dir / "parity.json", parity_fixture(
-        session, tokenizer, _first_pair(args.run_dir), args.dataset_dir, calibration))
+        session, tokenizer, _first_pair(args.run_dir), args.datasets_dir, calibration))
     print(f"browser bundle (re-fit calibration, parity fixture) -> {web_dir}")
 
     with common.mlflow_run("export", args):

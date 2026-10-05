@@ -115,7 +115,7 @@ labels:
 
 DOCKER_RUN = docker run --rm $(if $(filter 1,$(GPU)),--gpus all) $(if $(wildcard .env.local),--env-file .env.local) \
 	-v $(CURDIR)/$(DATASET):/datasets:ro -v $(CURDIR)/$(RUNS):/runs -v $(CURDIR)/.cache:/cache jobfit-pipeline
-STAGE_ARGS = --dataset-dir /datasets --runs-dir /runs --model $(MODEL) --candidate $(CANDIDATE)
+STAGE_ARGS = --datasets-dir /datasets --runs-dir /runs --model $(MODEL) --candidate $(CANDIDATE)
 
 local-prepare: build
 	mkdir -p $(RUNS)

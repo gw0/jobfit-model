@@ -153,7 +153,7 @@ spec:
         args:
           - >-
             {{inputs.parameters.command}}
-            --dataset-dir /datasets --runs-dir /runs --model {{workflow.parameters.model}}
+            --datasets-dir /datasets --runs-dir /runs --model {{workflow.parameters.model}}
             --candidate '{{workflow.parameters.candidate}}' --run-group {{workflow.name}}
         env:
           # From `make cluster-secrets`; optional, so public models run without it.

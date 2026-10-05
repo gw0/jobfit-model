@@ -43,11 +43,11 @@ def num_levels(qid):
 
 
 def add_common_args(parser):
-    parser.add_argument("--dataset-dir", type=Path, default=REPO_ROOT / "datasets",
+    parser.add_argument("--datasets-dir", type=Path, required=True,
                         help="committed corpus (cvs/jobs/labels/splits), read-only")
-    parser.add_argument("--runs-dir", type=Path, default=REPO_ROOT / "runs",
+    parser.add_argument("--runs-dir", type=Path, required=True,
                         help="pipeline output, one <candidate>/ subdirectory per candidate, "
-                             "plus the local MLflow store in mlflow/")
+                             "plus the local MLflow store in mlflow-local/")
     parser.add_argument("--model", default=DEFAULT_MODEL, help="HF base model id")
     parser.add_argument("--candidate", default=None,
                         help="this run's name: the model slug for default settings, else the slug "
@@ -114,9 +114,9 @@ def read_json(path):
 
 # --- labels -> targets -----------------------------------------------------------------
 
-def load_labels(dataset_dir):
+def load_labels(datasets_dir):
     """labels/{cvs,jobs,pairs}.jsonl keyed by path-id ((cv, job) for pairs)."""
-    labels_dir = Path(dataset_dir) / "labels"
+    labels_dir = Path(datasets_dir) / "labels"
     cv_labels = {r["cv"]: r for r in corpus.load_jsonl(labels_dir / "cvs.jsonl")}
     job_labels = {r["job"]: r for r in corpus.load_jsonl(labels_dir / "jobs.jsonl")}
     pair_labels = {(r["cv"], r["job"]): r for r in corpus.load_jsonl(labels_dir / "pairs.jsonl")}
@@ -309,11 +309,11 @@ def _group_parent_run_id(mlflow, run_group):
 def mlflow_run(stage, args, tags=None):
     """An MLflow run tagged with stage/model/candidate/git SHA. With `args.run_group`
     (Argo passes the workflow name) it is nested under that group's parent run. The
-    tracking server is taken from MLFLOW_TRACKING_URI, else a local <runs-dir>/mlflow store."""
+    tracking server is taken from MLFLOW_TRACKING_URI, else a local <runs-dir>/mlflow-local store."""
     import mlflow
 
     if not os.environ.get("MLFLOW_TRACKING_URI"):
-        mlflow.set_tracking_uri((args.runs_dir / "mlflow").resolve().as_uri())
+        mlflow.set_tracking_uri((args.runs_dir / "mlflow-local").resolve().as_uri())
     mlflow.set_experiment(MLFLOW_EXPERIMENT)
     tags = {"stage": stage, "model": args.model, "candidate": args.candidate, "git_sha": git_sha(), **(tags or {})}
     run_name, run_group = f"{stage}-{args.candidate}", args.run_group

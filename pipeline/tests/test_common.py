@@ -4,6 +4,7 @@ import argparse
 import math
 import sys
 import types
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -95,7 +96,7 @@ def _parse(tmp_path, *argv, stage=None):
     parser = argparse.ArgumentParser()
     common.add_common_args(parser)
     parser.add_argument("--lr", type=float, default=1e-4)
-    return common.parse_args(parser, stage, ["--runs-dir", str(tmp_path), *argv])
+    return common.parse_args(parser, stage, ["--datasets-dir", str(tmp_path), "--runs-dir", str(tmp_path), *argv])
 
 
 def test_parse_args_candidate_defaults_to_the_model_slug(tmp_path):
@@ -117,8 +118,9 @@ def test_parse_args_merges_each_stage_into_config_json(tmp_path):
 
 # --- mlflow_run parent lookup ------------------------------------------------------------
 
-def _args(candidate="qwen3-0.6b", run_group=None):
-    return types.SimpleNamespace(model="Qwen/Qwen3-0.6B", candidate=candidate, run_group=run_group)
+def _args(candidate="smollm2-135m-instruct", run_group=None):
+    return types.SimpleNamespace(model=common.DEFAULT_MODEL, candidate=candidate, run_group=run_group,
+                                 runs_dir=Path("/runs"))
 
 
 class _FakeMlflow(types.SimpleNamespace):
@@ -134,6 +136,9 @@ class _FakeMlflow(types.SimpleNamespace):
                 return types.SimpleNamespace(info=types.SimpleNamespace(run_id=f"parent-{len(fake.created)}"))
 
         self.MlflowClient = Client
+
+    def set_tracking_uri(self, uri):
+        self.tracking_uri = uri
 
     def set_experiment(self, name):
         pass
@@ -165,6 +170,7 @@ class _NullContext:
 def test_mlflow_run_nests_every_stage_under_one_parent_per_group(monkeypatch):
     fake = _FakeMlflow()
     monkeypatch.setitem(sys.modules, "mlflow", fake)
+    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
     for stage in ("prepare", "finetune"):
         with common.mlflow_run(stage, _args(run_group="wf-1")):
             pass
@@ -180,12 +186,13 @@ def test_mlflow_run_nests_every_stage_under_one_parent_per_group(monkeypatch):
 def test_mlflow_run_without_group_is_top_level(monkeypatch):
     fake = _FakeMlflow()
     monkeypatch.setitem(sys.modules, "mlflow", fake)
-    with common.mlflow_run("calibrate", _args(candidate="qwen3-0.6b-r16"), tags={"extra": "x"}):
+    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+    with common.mlflow_run("calibrate", _args(candidate="smollm2-135m-instruct-r16"), tags={"extra": "x"}):
         pass
-    assert fake.created == []
+    assert fake.tracking_uri == "file:///runs/mlflow-local" and fake.created == []
     (call,) = fake.started
-    assert call["run_name"] == "calibrate-qwen3-0.6b-r16" and call["tags"]["extra"] == "x"
-    assert call["tags"]["candidate"] == "qwen3-0.6b-r16" and call["tags"]["model"] == "Qwen/Qwen3-0.6B"
+    assert call["run_name"] == "calibrate-smollm2-135m-instruct-r16" and call["tags"]["extra"] == "x"
+    assert call["tags"]["candidate"] == "smollm2-135m-instruct-r16" and call["tags"]["model"] == common.DEFAULT_MODEL
 
 
 def test_label_weights_mask_missing_and_below_floor():

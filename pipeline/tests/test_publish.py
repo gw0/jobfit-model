@@ -7,7 +7,7 @@ import publish
 import report
 
 
-def _eval_result(mean_mae, baseline_mae, n_beat, skipped=False, model="Qwen/Qwen3-0.6B"):
+def _eval_result(mean_mae, baseline_mae, n_beat, skipped=False, model="HuggingFaceTB/SmolLM2-135M-Instruct"):
     metrics, floor = {}, {}
     for i, qid in enumerate(common.QUESTION_IDS):
         metrics[qid] = {"mae": mean_mae - 0.05 if i < n_beat else mean_mae + 0.05,
@@ -33,24 +33,24 @@ def test_pick_winner_across_candidates_uses_most_advanced_stage():
 
 
 def test_load_candidates_and_report_files(tmp_path):
-    for slug, mae in (("qwen3-0.6b", 0.3), ("llama-3.2-1b", 0.2)):
+    for slug, mae in (("smollm2-135m-instruct", 0.3), ("llama-3.2-1b", 0.2)):
         common.write_json(tmp_path / slug / "eval" / "quantized.json", _eval_result(mae, 0.4, 3, model=slug))
     candidates = publish.load_candidates(tmp_path)
-    assert set(candidates) == {"qwen3-0.6b", "llama-3.2-1b"}
-    export_dir = tmp_path / "qwen3-0.6b" / "export"
+    assert set(candidates) == {"smollm2-135m-instruct", "llama-3.2-1b"}
+    export_dir = tmp_path / "smollm2-135m-instruct" / "export"
     (export_dir / "quantized").mkdir(parents=True)
     (export_dir / "model.onnx").write_bytes(b"x" * 10)
     (export_dir / "model.onnx_data").write_bytes(b"x" * 90)  # fp32 weights live out of the graph
 
-    built = publish.build_report(tmp_path, "qwen3-0.6b", candidates, "abc123")
+    built = publish.build_report(tmp_path, "smollm2-135m-instruct", candidates, "abc123")
     assert built["deployability"]["onnx_fp32_bytes"] == 100
     assert built["deployability"]["onnx_quantized_bytes"] is None
     assert built["winner"] == "llama-3.2-1b"
-    assert set(built["candidates"]) == {"qwen3-0.6b", "llama-3.2-1b"}
+    assert set(built["candidates"]) == {"smollm2-135m-instruct", "llama-3.2-1b"}
     assert math.isclose(built["quality"]["quantized"]["shuffle_mean_abs_shift"], 0.1)
     assert math.isnan(built["quality"]["zeroshot"]["mean_mae"])
 
-    json_path, md_path = publish.write_report(built, tmp_path / "qwen3-0.6b" / "reports")
+    json_path, md_path = publish.write_report(built, tmp_path / "smollm2-135m-instruct" / "reports")
     assert common.read_json(json_path)["git_sha"] == "abc123"
     md = md_path.read_text()
     assert "abc123" in md and "`llama-3.2-1b`" in md and "17/17" in md
@@ -58,7 +58,7 @@ def test_load_candidates_and_report_files(tmp_path):
 
 
 def test_render_markdown_calibration_mean():
-    built = report.assemble_report("qwen3-0.6b", "Qwen/Qwen3-0.6B", "abc", {"calibrated": _eval_result(0.2, 0.3, 1)},
+    built = report.assemble_report("smollm2-135m-instruct", "HuggingFaceTB/SmolLM2-135M-Instruct", "abc", {"calibrated": _eval_result(0.2, 0.3, 1)},
                                    {"temperature": 1.5, "confidence_threshold": 0.4}, {})
     built["calibration"]["calibrated"][common.QUESTION_IDS[0]]["insufficient_rate"] = 1.0
     rows = {r["stage"]: r for r in report.stage_rows(built)}
@@ -69,12 +69,12 @@ def test_render_markdown_calibration_mean():
 
 
 def test_hf_repo_id_and_model_card():
-    assert publish.hf_repo_id("qwen3-0.6b", "jobfit") == "jobfit/jobfit-qwen3-0.6b"
-    assert publish.hf_repo_id("qwen3-0.6b", "jobfit", "me/custom") == "me/custom"
+    assert publish.hf_repo_id("smollm2-135m-instruct", "jobfit") == "jobfit/jobfit-smollm2-135m-instruct"
+    assert publish.hf_repo_id("smollm2-135m-instruct", "jobfit", "me/custom") == "me/custom"
 
-    built = report.assemble_report("qwen3-0.6b", "Qwen/Qwen3-0.6B", "abc123",
+    built = report.assemble_report("smollm2-135m-instruct", "HuggingFaceTB/SmolLM2-135M-Instruct", "abc123",
                                    {"quantized": _eval_result(0.2, 0.25, 12)}, None, {})
-    card = publish.build_model_card(built, "jobfit/jobfit-qwen3-0.6b")
+    card = publish.build_model_card(built, "jobfit/jobfit-smollm2-135m-instruct")
     assert card.startswith("---\n") and "license: apache-2.0" in card
     assert "abc123" in card and "12/17 questions" in card
 
@@ -85,9 +85,9 @@ def test_hf_repo_id_and_model_card():
 
 
 def test_variant_candidate_reports_its_config_and_base_licence(tmp_path):
-    common.write_json(tmp_path / "qwen3-0.6b-r16" / "eval" / "quantized.json", _eval_result(0.2, 0.25, 12))
-    common.write_json(tmp_path / "qwen3-0.6b-r16" / "config.json", {"finetune": {"lora_rank": 16}})
-    built = publish.build_report(tmp_path, "qwen3-0.6b-r16", publish.load_candidates(tmp_path), "abc123")
-    assert built["candidate"] == "qwen3-0.6b-r16" and built["config"] == {"finetune": {"lora_rank": 16}}
+    common.write_json(tmp_path / "smollm2-135m-instruct-r16" / "eval" / "quantized.json", _eval_result(0.2, 0.25, 12))
+    common.write_json(tmp_path / "smollm2-135m-instruct-r16" / "config.json", {"finetune": {"lora_rank": 16}})
+    built = publish.build_report(tmp_path, "smollm2-135m-instruct-r16", publish.load_candidates(tmp_path), "abc123")
+    assert built["candidate"] == "smollm2-135m-instruct-r16" and built["config"] == {"finetune": {"lora_rank": 16}}
     assert "- finetune: lora_rank=16" in report.render_markdown(built)
-    assert "license: apache-2.0" in publish.build_model_card(built, "jobfit/jobfit-qwen3-0.6b-r16")
+    assert "license: apache-2.0" in publish.build_model_card(built, "jobfit/jobfit-smollm2-135m-instruct-r16")
