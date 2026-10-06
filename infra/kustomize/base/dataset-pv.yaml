@@ -5,8 +5,6 @@ apiVersion: v1
 kind: PersistentVolume
 metadata:
   name: dataset
-  labels:
-    app: dataset
 spec:
   capacity:
     storage: 2Gi

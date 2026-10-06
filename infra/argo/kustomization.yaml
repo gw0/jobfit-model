@@ -8,6 +8,7 @@ kind: Kustomization
 namespace: jobfit
 
 resources:
+  # Keep the version in sync with ARGO_VERSION in the Makefile.
   - github.com/argoproj/argo-workflows/manifests/cluster-install?ref=v3.6.2
   - executor-rbac.yaml
 

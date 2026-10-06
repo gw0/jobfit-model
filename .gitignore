@@ -4,15 +4,6 @@ _*
 !.gitignore
 !.dockerignore
 !.github/
-!__init__.py
-
-# SQLite scratch files
-:memory:*
-
-# Python
-__pycache__/
-*.pyc
-*.egg-info/
 
 # Node
 node_modules/

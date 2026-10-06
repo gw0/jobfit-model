@@ -21,14 +21,15 @@
 	cluster-up cluster-secrets cluster-down cluster-check cluster-logs cluster-mlflow cluster-run \
 	push-hf-model push-hf-frontend push-wandb-report
 
-VENV ?= .venv/bin
-PY ?= $(VENV)/python
+VENV ?= .venv
+PY ?= $(VENV)/bin/python
 NPM ?= npm
 
 SCALE ?= smoke
 DATASET := datasets_$(SCALE)
 RUNS := runs_$(SCALE)
 MODEL ?= HuggingFaceTB/SmolLM2-135M-Instruct
+# The model slug, as pipeline/common.py model_slug().
 CANDIDATE ?= $(shell echo '$(notdir $(MODEL))' | tr A-Z a-z)
 GPU ?= 0
 
@@ -55,10 +56,10 @@ endif
 JOBS_PER_CALL ?= 10
 
 # Entry-point scripts use `#!/usr/bin/env python3`; resolve that to the venv.
-export PATH := $(CURDIR)/.venv/bin:$(PATH)
+export PATH := $(CURDIR)/$(VENV)/bin:$(PATH)
 
 # Cluster CLIs go into the venv too, pinned: argo matches the controller in
-# infra/argo/kustomization.yaml, kind's release decides the node's Kubernetes version,
+# infra/argo/kustomization.yaml (keep the two in sync), kind's release decides the node's Kubernetes version,
 # kubectl matches that node. socat (the cluster-up tunnel) and docker come from the system.
 ARGO_VERSION ?= v3.6.2
 KIND_VERSION ?= v0.27.0
@@ -67,13 +68,13 @@ OS := $(shell uname -s | tr A-Z a-z)
 ARCH := $(shell uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')
 
 venv:
-	python3 -m venv .venv
+	python3 -m venv $(VENV)
 	$(PY) -m pip install -q pytest scipy -r data/requirements.txt -r pipeline/requirements.txt
 	$(PY) -m spacy download en_core_web_sm
-	curl -fsSL https://github.com/argoproj/argo-workflows/releases/download/$(ARGO_VERSION)/argo-$(OS)-$(ARCH).gz | gunzip > $(VENV)/argo
-	curl -fsSLo $(VENV)/kind https://kind.sigs.k8s.io/dl/$(KIND_VERSION)/kind-$(OS)-$(ARCH)
-	curl -fsSLo $(VENV)/kubectl https://dl.k8s.io/release/$(KUBECTL_VERSION)/bin/$(OS)/$(ARCH)/kubectl
-	chmod +x $(VENV)/argo $(VENV)/kind $(VENV)/kubectl
+	curl -fsSL https://github.com/argoproj/argo-workflows/releases/download/$(ARGO_VERSION)/argo-$(OS)-$(ARCH).gz | gunzip > $(VENV)/bin/argo
+	curl -fsSLo $(VENV)/bin/kind https://kind.sigs.k8s.io/dl/$(KIND_VERSION)/kind-$(OS)-$(ARCH)
+	curl -fsSLo $(VENV)/bin/kubectl https://dl.k8s.io/release/$(KUBECTL_VERSION)/bin/$(OS)/$(ARCH)/kubectl
+	chmod +x $(VENV)/bin/argo $(VENV)/bin/kind $(VENV)/bin/kubectl
 
 build:
 	docker build -t jobfit-pipeline -f docker/pipeline.Dockerfile --build-arg GIT_SHA=$$(git rev-parse HEAD) .
@@ -147,7 +148,7 @@ copy-model:
 	mkdir -p frontend/public/models
 	cp -r $(RUNS)/$(CANDIDATE)/export/web frontend/public/models/default
 
-frontend-check: local-export copy-model build
+frontend-check: local-export copy-model
 	cd frontend && $(NPM) install
 	node frontend/scripts/verify-parity.mjs frontend/public/models/default
 	docker run --rm -d --name $(FRONTEND_CHECK_NAME) jobfit-frontend
@@ -273,16 +274,16 @@ cluster-run: build
 		 curl -sf http://otel-collector.jobfit.svc.cluster.local:8889/metrics | grep -q gpu_utilization_percent'
 	echo "report: $(RUNS)/$(CANDIDATE)/reports/report.md"
 
-# --- publishing: .env.publish holds HF_TOKEN (write), HF_SPACE_REPO, optionally HF_MODEL_REPO
-# (default gw0/jobfit-model) and, for the W&B report, WANDB_API_KEY ----------------------
+# --- publishing: .env.publish holds HF_TOKEN (write) and, for the W&B report, WANDB_API_KEY;
+# it may also set HF_MODEL_REPO (default gw0/jobfit-model) and HF_SPACE_REPO (default gw0/jobfit-app)
 
 PUBLISH := set -a; . ./.env.publish; set +a;
 
 push-hf-model:
-	$(PUBLISH) ./pipeline/publish.py --runs-dir $(RUNS) --model $(MODEL) --candidate $(CANDIDATE) --push-hf
+	$(PUBLISH) ./pipeline/publish.py --datasets-dir $(DATASET) --runs-dir $(RUNS) --model $(MODEL) --candidate $(CANDIDATE) --push-hf
 
 push-hf-frontend:
 	$(PUBLISH) frontend/scripts/push-hf-frontend.sh
 
 push-wandb-report:
-	$(PUBLISH) ./pipeline/publish.py --runs-dir $(RUNS) --model $(MODEL) --candidate $(CANDIDATE) --push-wandb
+	$(PUBLISH) ./pipeline/publish.py --datasets-dir $(DATASET) --runs-dir $(RUNS) --model $(MODEL) --candidate $(CANDIDATE) --push-wandb

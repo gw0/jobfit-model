@@ -12,5 +12,5 @@ license: agpl-3.0
 
 A CV/job-description fit-scoring app. Scoring runs entirely client-side
 (transformers.js + ONNX Runtime Web) -- nothing you paste or upload leaves your
-browser. See the [source repository](https://github.com/gw0/jobfit) for the full
+browser. See the [source repository](https://github.com/gw0/jobfit-model) for the full
 pipeline, dataset, and benchmark report.

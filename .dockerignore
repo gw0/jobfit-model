@@ -1,16 +1,9 @@
 # Build contexts only need questions.json, data/, pipeline/ and frontend/ sources.
 .*
 **/__pycache__/
-*.pyc
+**/*.tsbuildinfo
 frontend/node_modules/
 frontend/dist/
 frontend/public/models/
-*.tsbuildinfo
 datasets*/
 runs*/
-*.onnx
-*.onnx_data
-*.safetensors
-*.bin
-*.gguf
-models/

@@ -5,12 +5,12 @@
 # main of HF_MODEL_REPO (default gw0/jobfit-model).
 #
 # Usage:
-#   HF_TOKEN=hf_... HF_SPACE_REPO=<user-or-org>/jobfit [HF_MODEL_REPO=<user-or-org>/<name>] \
-#   frontend/scripts/push-hf-frontend.sh
+#   HF_TOKEN=hf_... [HF_SPACE_REPO=<org>/<space>] [HF_MODEL_REPO=<org>/<model>] \
+#   frontend/scripts/push-hf-frontend.sh    (needs huggingface_hub: `make venv`)
 set -euo pipefail
 
 : "${HF_TOKEN:?set HF_TOKEN to a real HF Hub API token with write access}"
-: "${HF_SPACE_REPO:?set HF_SPACE_REPO to <user-or-org>/<space-name>}"
+HF_SPACE_REPO="${HF_SPACE_REPO:-gw0/jobfit-app}"
 JOBFIT_MODEL_URL="${JOBFIT_MODEL_URL:-https://huggingface.co/${HF_MODEL_REPO:-gw0/jobfit-model}/resolve/main}"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -24,9 +24,7 @@ printf '{"modelUrl": "%s"}\n' "$JOBFIT_MODEL_URL" > "$FRONTEND_DIR/dist/config.j
 
 cp "$FRONTEND_DIR/space-readme.md" "$FRONTEND_DIR/dist/README.md"
 
-python3 -m pip show huggingface_hub >/dev/null 2>&1 || python3 -m pip install -q huggingface_hub
-
-HF_TOKEN="$HF_TOKEN" python3 - "$FRONTEND_DIR/dist" "$HF_SPACE_REPO" <<'PYEOF'
+python3 - "$FRONTEND_DIR/dist" "$HF_SPACE_REPO" <<'PYEOF'
 import sys
 
 from huggingface_hub import HfApi
