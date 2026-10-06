@@ -14,8 +14,10 @@ def _eval_result(mean_mae, baseline_mae, n_beat, skipped=False, model="HuggingFa
                         "spearman_rho": 0.5, "confidence_error_spearman": -0.4, "insufficient_rate": 0.1}
         floor[qid] = {"mae": baseline_mae}
     shuffle = {qid: {"mean_abs_shift": 0.1, "mae": 0.4} for qid in common.QUESTION_IDS}
-    return {"skipped": skipped, "model": model, "metrics": metrics,
-            "baselines": {"train_mean": floor}, "shuffle_control": shuffle}
+    ci = {qid: {"mae_ci_lo": mean_mae - 0.1, "mae_ci_hi": mean_mae + 0.1} for qid in common.QUESTION_IDS}
+    return {"skipped": skipped, "model": model, "n": 500, "metrics": metrics,
+            "baselines": {"train_mean": floor, "keyword_overlap": floor}, "bootstrap_mae_ci": ci,
+            "shuffle_control": shuffle}
 
 
 def test_beats_floor_count():
@@ -53,12 +55,14 @@ def test_load_candidates_and_report_files(tmp_path):
     json_path, md_path = publish.write_report(built, tmp_path / "smollm2-135m-instruct" / "reports")
     assert common.read_json(json_path)["git_sha"] == "abc123"
     md = md_path.read_text()
-    assert "abc123" in md and "`llama-3.2-1b`" in md and "17/17" in md
-    assert "Acceptance criteria" not in md
+    assert "abc123" in md and "**llama-3.2-1b** (winner)" in md and "17/17" in md
+    assert "## Per question (quantized)" in md and "| skills_match |" in md
+    assert "train-mean baseline | 0.4000" in md
 
 
 def test_render_markdown_calibration_mean():
-    built = report.assemble_report("smollm2-135m-instruct", "HuggingFaceTB/SmolLM2-135M-Instruct", "abc", {"calibrated": _eval_result(0.2, 0.3, 1)},
+    built = report.assemble_report("smollm2-135m-instruct", "HuggingFaceTB/SmolLM2-135M-Instruct", "abc",
+                                   {"smollm2-135m-instruct": {"calibrated": _eval_result(0.2, 0.3, 1)}}, {},
                                    {"temperature": 1.5, "confidence_threshold": 0.4}, {})
     built["calibration"]["calibrated"][common.QUESTION_IDS[0]]["insufficient_rate"] = 1.0
     rows = {r["stage"]: r for r in report.stage_rows(built)}
@@ -70,13 +74,13 @@ def test_render_markdown_calibration_mean():
 
 def test_model_card():
     built = report.assemble_report("smollm2-135m-instruct", "HuggingFaceTB/SmolLM2-135M-Instruct", "abc123",
-                                   {"quantized": _eval_result(0.2, 0.25, 12)}, None, {})
+                                   {"smollm2-135m-instruct": {"quantized": _eval_result(0.2, 0.25, 12)}}, {}, None, {})
     card = publish.build_model_card(built, "gw0/jobfit-model")
     assert card.startswith("---\n") and "license: apache-2.0" in card
     assert "abc123" in card and "12/17 questions" in card
 
     built = report.assemble_report("minicpm5-2b", "openbmb/MiniCPM5-2B", "abc123",
-                                   {"quantized": _eval_result(0.2, 0.25, 12)}, None, {})
+                                   {"minicpm5-2b": {"quantized": _eval_result(0.2, 0.25, 12)}}, {}, None, {})
     card = publish.build_model_card(built, "gw0/jobfit-model")
     assert "license: other" in card and "verify before use" in card
 
@@ -85,6 +89,6 @@ def test_variant_candidate_reports_its_config_and_base_licence(tmp_path):
     common.write_json(tmp_path / "smollm2-135m-instruct-r16" / "eval" / "quantized.json", _eval_result(0.2, 0.25, 12))
     common.write_json(tmp_path / "smollm2-135m-instruct-r16" / "config.json", {"finetune": {"lora_rank": 16}})
     built = publish.build_report(tmp_path, "smollm2-135m-instruct-r16", publish.load_candidates(tmp_path), "abc123")
-    assert built["candidate"] == "smollm2-135m-instruct-r16" and built["config"] == {"finetune": {"lora_rank": 16}}
-    assert "- finetune: lora_rank=16" in report.render_markdown(built)
+    assert built["candidate"] == "smollm2-135m-instruct-r16" and built["settings"] == {"lora_rank": 16}
+    assert "- Settings: lora_rank=16" in report.render_markdown(built)
     assert "license: apache-2.0" in publish.build_model_card(built, "gw0/jobfit-model")

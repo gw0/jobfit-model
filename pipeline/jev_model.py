@@ -52,9 +52,9 @@ class JevModel(torch.nn.Module):
         return logits if head.bias is None else logits + head.bias[candidate_ids]
 
 
-def candidate_mask(counts, device=None):
+def candidate_mask(counts):
     """(Q, MAX_CANDIDATES) bool: which candidate slots are real, per question."""
-    return torch.arange(jev.MAX_CANDIDATES, device=device)[None, :] < torch.tensor(counts, device=device)[:, None]
+    return torch.arange(jev.MAX_CANDIDATES)[None, :] < torch.tensor(counts)[:, None]
 
 
 def answer_loss(answer_logits, targets, weights, mask):

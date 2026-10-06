@@ -24,15 +24,16 @@ spec:
       # NVIDIA GPUs per stage pod; 0 runs on CPU. >0 needs `make cluster-up GPU=1`.
       - name: gpus
         value: "0"
+      # Training knobs; the defaults mirror pipeline/train.py's.
       - name: lora-rank
         value: "8"
       - name: lora-alpha
         value: "16"
       - name: lora-layers
         value: "8"
-      - name: lr-finetune
+      - name: lr
         value: "4e-4"
-      - name: epochs-finetune
+      - name: epochs
         value: "5"
 
   # `dataset` is the committed corpus, mounted read-only; `runs` holds pipeline output;
@@ -76,8 +77,8 @@ spec:
                 - name: command
                   value: >-
                     ./pipeline/train.py
-                    --lr {{workflow.parameters.lr-finetune}}
-                    --epochs {{workflow.parameters.epochs-finetune}}
+                    --lr {{workflow.parameters.lr}}
+                    --epochs {{workflow.parameters.epochs}}
                     --lora-rank {{workflow.parameters.lora-rank}}
                     --lora-alpha {{workflow.parameters.lora-alpha}}
                     --lora-layers {{workflow.parameters.lora-layers}}

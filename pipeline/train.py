@@ -25,7 +25,7 @@ import transformers
 import common
 import jev_model
 
-LORA_TARGET_MODULES = "q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj"
+LORA_TARGET_MODULES = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
 LABEL_NAMES = ["targets", "weights"]
 
 
@@ -67,7 +67,7 @@ def _build_model(args):
     layers = model.lm.config.num_hidden_layers
     top = range(layers - args.lora_layers, layers) if args.lora_layers else None
     lora = LoraConfig(r=args.lora_rank, lora_alpha=args.lora_alpha,
-                      target_modules=args.lora_target_modules.split(","), layers_to_transform=top)
+                      target_modules=LORA_TARGET_MODULES, layers_to_transform=top)
     peft_lm = get_peft_model(model.lm, lora)  # injects the adapters into model.lm in place
     return model, peft_lm, tokenizer
 
@@ -112,7 +112,6 @@ def _run(args):
         label_names=LABEL_NAMES,
         remove_unused_columns=False,
         report_to=["mlflow"],
-        run_name=f"finetune-{args.candidate}",
     )
     trainer = JevTrainer(
         model=model,
@@ -127,8 +126,7 @@ def _run(args):
         mlflow.log_params({"confidence_floor": args.confidence_floor,
                            "train_pairs": len(train_cache["pairs"]),
                            "val_pairs": 0 if val_cache is None else len(val_cache["pairs"]),
-                           "lora_rank": args.lora_rank, "lora_alpha": args.lora_alpha, "lora_layers": args.lora_layers,
-                           "lora_target_modules": args.lora_target_modules})
+                           "lora_rank": args.lora_rank, "lora_alpha": args.lora_alpha, "lora_layers": args.lora_layers})
         common.log_dataset_input(train_cache, args.run_dir, "train", context="training")
         if val_cache is not None:
             common.log_dataset_input(val_cache, args.run_dir, "val", context="training")
@@ -141,18 +139,18 @@ def _run(args):
         tokenizer.save_pretrained(out_dir)
         shutil.rmtree(trainer_dir, ignore_errors=True)
         print(f"saved finetune checkpoint -> {out_dir}")
-        common.log_model_signature(model.eval(), train_cache)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     common.add_common_args(parser)
+    common.add_inference_args(parser)
+    common.add_seed_arg(parser)
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--lr", type=float, default=4e-4)
     parser.add_argument("--lora-rank", type=int, default=8)
     parser.add_argument("--lora-alpha", type=int, default=16)
     parser.add_argument("--lora-layers", type=int, default=8, help="adapters on the top N layers (0: all)")
-    parser.add_argument("--lora-target-modules", default=LORA_TARGET_MODULES)
     args = common.parse_args(parser, "finetune")
     with common.stage_span("finetune"):
         _run(args)

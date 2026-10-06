@@ -52,12 +52,19 @@ def add_common_args(parser):
     parser.add_argument("--candidate", default=None,
                         help="this run's name: the model slug for default settings, else the slug "
                              "plus what changed, e.g. smollm2-135m-instruct-r16 (default: the model slug)")
+    parser.add_argument("--run-group", default=None,
+                        help="nest this stage's MLflow run under the parent run of this group")
+
+
+def add_inference_args(parser):
+    """For the stages that read labels and run the model."""
     parser.add_argument("--confidence-floor", type=float, default=0.3,
                         help="labels below this judge confidence are masked out")
     parser.add_argument("--batch-size", type=int, default=16)
-    parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--run-group", default=None,
-                        help="nest this stage's MLflow run under the parent run of this group")
+
+
+def add_seed_arg(parser):
+    parser.add_argument("--seed", type=int, default=corpus.DEFAULT_SEED)
 
 
 def model_slug(model_name):
@@ -237,17 +244,18 @@ def onnx_bytes(directory):
 MODEL_INPUTS = ("input_ids", "segment_ids", "answer_positions")
 
 
-def predict_answer_logits(model, cache, batch_size=16):
+def predict_answer_logits(model, cache, batch_size):
     """(N, Q, MAX_CANDIDATES) answer logits as numpy, for a JevModel or an ONNX Runtime
     InferenceSession of its export alike."""
     import torch
     from tqdm import tqdm
 
+    if isinstance(model, torch.nn.Module):
+        device = next(model.parameters()).device
     chunks = []
-    for start in tqdm(range(0, len(cache["pairs"]), batch_size), desc="predicting", unit="batch", dynamic_ncols=True):
+    for start in tqdm(range(0, len(cache["input_ids"]), batch_size), desc="predicting", unit="batch", dynamic_ncols=True):
         batch = [cache[name][start:start + batch_size] for name in MODEL_INPUTS]
         if isinstance(model, torch.nn.Module):
-            device = next((p.device for p in model.parameters()), torch.device("cpu"))
             with torch.no_grad():
                 logits = model(*[t.to(device) for t in batch], cache["candidate_ids"].to(device))
             chunks.append(logits.float().cpu().numpy())
@@ -341,10 +349,9 @@ def log_model_signature(model, cache):
     """Logs an inferred model signature from one sample forward pass."""
     import mlflow
 
-    one = {**{name: cache[name][:1] for name in MODEL_INPUTS}, "candidate_ids": cache["candidate_ids"],
-           "pairs": cache["pairs"][:1]}
-    inputs = {name: one[name].numpy() for name in (*MODEL_INPUTS, "candidate_ids")}
-    signature = mlflow.models.infer_signature(inputs, predict_answer_logits(model, one))
+    one = {**{name: cache[name][:1] for name in MODEL_INPUTS}, "candidate_ids": cache["candidate_ids"]}
+    inputs = {name: tensor.numpy() for name, tensor in one.items()}
+    signature = mlflow.models.infer_signature(inputs, predict_answer_logits(model, one, 1))
     mlflow.log_dict(signature.to_dict(), "signature.json")
 
 

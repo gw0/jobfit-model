@@ -4,9 +4,9 @@ candidate's benchmark report, register it in MLflow (moving the `champion` alias
 the winner), and optionally push the winner to the HF Hub and the report to W&B.
 
 Usage:
-    ./pipeline/publish.py --runs-dir runs_smoke --model HuggingFaceTB/SmolLM2-135M-Instruct
-    HF_TOKEN=... ./pipeline/publish.py --runs-dir runs_smoke --push-hf [--hf-repo <org>/<name>]
-    WANDB_API_KEY=... ./pipeline/publish.py --runs-dir runs_smoke --push-wandb
+    ./pipeline/publish.py --datasets-dir datasets_smoke --runs-dir runs_smoke
+    HF_TOKEN=... ./pipeline/publish.py --datasets-dir datasets_smoke --runs-dir runs_smoke --push-hf [--hf-repo <org>/<name>]
+    WANDB_API_KEY=... ./pipeline/publish.py --datasets-dir datasets_smoke --runs-dir runs_smoke --push-wandb
 
 Reads <runs-dir>/*/eval/<stage>.json and <runs-dir>/<candidate>/{config.json,export/web/},
 writes <runs-dir>/<candidate>/reports/{report.json,report.md} -- the one pipeline output that is
@@ -49,8 +49,8 @@ def _model_of(by_stage):
     return next(r["model"] for r in by_stage.values() if "model" in r)
 
 
-def _read_json_if_present(path):
-    return common.read_json(path) if path.is_file() else None
+def _read_json_if_present(path, default=None):
+    return common.read_json(path) if path.is_file() else default
 
 
 def build_report(runs_dir, candidate, candidates, git_sha):
@@ -59,9 +59,9 @@ def build_report(runs_dir, candidate, candidates, git_sha):
     sizes = {"fp32": common.onnx_bytes(export_dir) or None,
              "quantized": common.onnx_bytes(export_dir / "quantized") or None}
     return report_lib.assemble_report(
-        candidate, _model_of(candidates[candidate]), git_sha, candidates[candidate],
-        _read_json_if_present(export_dir / "web" / "calibration.json"), sizes, candidates,
-        config=_read_json_if_present(run_dir / "config.json"),
+        candidate, _model_of(candidates[candidate]), git_sha, candidates,
+        _read_json_if_present(run_dir / "config.json", {}),
+        _read_json_if_present(export_dir / "web" / "calibration.json"), sizes,
     )
 
 

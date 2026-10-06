@@ -18,6 +18,14 @@ import common
 import metrics
 
 
+def fit_calibration(model, calib_cache, args):
+    """The calibration fit on the `calib` pairs with `model` (a JevModel or an ONNX
+    Runtime session)."""
+    answer_logits = common.predict_answer_logits(model, calib_cache, args.batch_size)
+    targets, confidences = common.build_targets(calib_cache["pairs"], common.load_labels(args.datasets_dir))
+    return metrics.fit_calibration(answer_logits, targets, confidences, args.confidence_floor)
+
+
 def _run(args):
     import mlflow
 
@@ -29,17 +37,14 @@ def _run(args):
     calib_cache = common.load_cache(args.run_dir, "calib")
     if calib_cache is None:
         print("0 calib pairs -- skipped, writing empty calibration")
-        common.write_json(out_path, {"temperature": math.nan, "confidence_threshold": math.nan})
+        common.write_json(out_path, metrics.EMPTY_CALIBRATION)
         return
 
     model = common.load_jev_model(checkpoint_dir).eval()
     hash_before = common.state_dict_hash(model)
-    answer_logits = common.predict_answer_logits(model, calib_cache, args.batch_size)
+    params = fit_calibration(model, calib_cache, args)
     if common.state_dict_hash(model) != hash_before:
         raise SystemExit("WEIGHT HASH CHANGED during calibrate -- inference must not touch weights")
-
-    targets, confidences = common.build_targets(calib_cache["pairs"], common.load_labels(args.datasets_dir))
-    params = metrics.fit_calibration(answer_logits, targets, confidences, args.confidence_floor)
     common.write_json(out_path, params)
     print(f"fit calibration on {len(calib_cache['pairs'])} calib pair(s) -> {out_path}: {params}")
 
@@ -52,6 +57,7 @@ def _run(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     common.add_common_args(parser)
+    common.add_inference_args(parser)
     args = common.parse_args(parser, "calibrate")
     with common.stage_span("calibrate"):
         _run(args)

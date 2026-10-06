@@ -27,7 +27,7 @@ def test_validate():
     jev.validate({"s": SCORE, "c": CHOICE, "n": NOUL})
     for bad in ({}, {"s": {**SCORE, "type": "rank"}}, {"s": {**SCORE, "criteria": ["only"]}},
                 {"s": {**SCORE, "question": " "}}, {"c": {**CHOICE, "criteria": ["x", "y"]}},
-                {"n": {**NOUL, "criteria": {"yes": "", "no": ""}}}):
+                {"n": {**NOUL, "criteria": {"yes": "", "no": ""}}}, {"c": {**CHOICE, "criteria": {"1": "a", "2": "b"}}}):
         with pytest.raises(ValueError):
             jev.validate(bad)
 

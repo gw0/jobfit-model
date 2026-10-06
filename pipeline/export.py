@@ -22,13 +22,15 @@ Reads <runs-dir>/<candidate>/checkpoints/finetune/, writes under <runs-dir>/<can
 """
 
 import argparse
-import math
 import shutil
 
+import numpy as np
+
+import calibrate
 import common
+import corpus
 import jev
 import metrics
-from common import corpus
 
 INPUT_NAMES = [*common.MODEL_INPUTS, "candidate_ids"]
 PARITY_ATOL = 1e-2
@@ -76,7 +78,6 @@ def matmul_names(path):
 def dequantize_weights(model, names):
     """Stores each named MatMul's weight as int8 (symmetric, per output channel) behind a
     DequantizeLinear node: the weight is small on disk, the activations stay fp32."""
-    import numpy as np
     from onnx import helper, numpy_helper
 
     graph = model.graph
@@ -121,9 +122,7 @@ def quantize_onnx(export_dir, quantized_dir):
 
 def logit_error(reference, session, cache, n=8):
     """Mean |answer logit| difference of two ONNX sessions on the first `n` pairs of `cache`."""
-    import numpy as np
-
-    head = {**cache, "pairs": cache["pairs"][:n], **{name: cache[name][:n] for name in common.MODEL_INPUTS}}
+    head = {**cache, **{name: cache[name][:n] for name in common.MODEL_INPUTS}}
     a, b = (common.predict_answer_logits(s, head, n) for s in (reference, session))
     return float(np.abs(a - b).mean())
 
@@ -132,10 +131,8 @@ def refit_calibration(session, args):
     calib_cache = common.load_cache(args.run_dir, "calib")
     if calib_cache is None:
         print("0 calib pairs -- shipping an empty calibration")
-        return {"temperature": math.nan, "confidence_threshold": math.nan}
-    answer_logits = common.predict_answer_logits(session, calib_cache, args.batch_size)
-    targets, confidences = common.build_targets(calib_cache["pairs"], common.load_labels(args.datasets_dir))
-    return metrics.fit_calibration(answer_logits, targets, confidences, args.confidence_floor)
+        return metrics.EMPTY_CALIBRATION
+    return calibrate.fit_calibration(session, calib_cache, args)
 
 
 def _first_pair(run_dir):
@@ -149,8 +146,6 @@ def _first_pair(run_dir):
 def parity_fixture(session, tokenizer, pair, datasets_dir, calibration):
     """One state, encoded and answered, for the frontend to reproduce. The questions
     budget is widened to fit the extra questions; the graph has no fixed length."""
-    import numpy as np
-
     state = common.jobfit_state((datasets_dir / pair["cv"]).read_text(encoding="utf-8"),
                          corpus.read_job_body(datasets_dir / pair["job"]))
     questions = {**common.QUESTIONS, **PARITY_EXTRA_QUESTIONS}
@@ -166,6 +161,7 @@ def parity_fixture(session, tokenizer, pair, datasets_dir, calibration):
         "state": state,
         "questions": questions,
         "state_budget": common.STATE_BUDGET,
+        "jobfit_questions_budget": common.QUESTIONS_BUDGET,
         "questions_budget": questions_budget,
         "pad_token_id": tokenizer.pad_token_id,
         **{name: encoded[name] for name in common.MODEL_INPUTS},
@@ -225,6 +221,7 @@ def _run(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     common.add_common_args(parser)
+    common.add_inference_args(parser)
     args = common.parse_args(parser, "export")
     with common.stage_span("export"):
         _run(args)

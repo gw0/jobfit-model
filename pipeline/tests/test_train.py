@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 
 torch = pytest.importorskip("torch")
-pytest.importorskip("transformers")
+transformers = pytest.importorskip("transformers")
 
 import common  # noqa: E402
 import jev_model  # noqa: E402
@@ -38,13 +38,17 @@ def test_make_dataset_rows():
     assert rows[0]["targets"].shape == (Q, 10) and rows[0]["weights"][0] == 0.0 and rows[1]["weights"][0] == 1.0
 
 
+def _trainer(tmp_path, model, counts):
+    return train.JevTrainer(
+        model=model, args=transformers.TrainingArguments(output_dir=str(tmp_path), report_to=[]),
+        candidate_ids=torch.zeros(Q, 10, dtype=torch.long), candidate_counts=counts,
+    )
+
+
 def test_compute_loss_is_the_answer_loss(tmp_path):
     model = _TinyJevModel()
     counts = [5] * Q
-    trainer = train.JevTrainer(
-        model=model, args=__import__("transformers").TrainingArguments(output_dir=str(tmp_path), report_to=[]),
-        candidate_ids=torch.zeros(Q, 10, dtype=torch.long), candidate_counts=counts,
-    )
+    trainer = _trainer(tmp_path, model, counts)
     rows = train.make_dataset(_cache(2), np.full((2, Q), 0.5), np.ones((2, Q)), 0.3)
     inputs = {k: torch.stack([r[k] for r in rows]) for k in rows[0]}
     loss, outputs = trainer.compute_loss(model, inputs, return_outputs=True)
@@ -67,10 +71,7 @@ class _CausalModel(torch.nn.Module):
 
 def test_compute_loss_drops_trailing_padding(tmp_path):
     model, counts = _CausalModel(), [5] * Q
-    trainer = train.JevTrainer(
-        model=model, args=__import__("transformers").TrainingArguments(output_dir=str(tmp_path), report_to=[]),
-        candidate_ids=torch.zeros(Q, 10, dtype=torch.long), candidate_counts=counts,
-    )
+    trainer = _trainer(tmp_path, model, counts)
     rows = train.make_dataset(_cache(2), np.full((2, Q), 0.5), np.ones((2, Q)), 0.3)
     inputs = {k: torch.stack([r[k] for r in rows]) for k in rows[0]}
     inputs["input_ids"] = torch.cat([inputs["input_ids"], torch.full((2, 6), 99)], dim=1)  # padding after the answers

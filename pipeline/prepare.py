@@ -2,9 +2,9 @@
 """`prepare` stage (specs §6): verify and materialise the committed splits, never re-split.
 
 Asserts train/test share no CV and no company, fails on any Presidio PII finding, then
-encodes each CV/JD pair with every question (jev.encode: CV then JD, truncated to 3072
-tokens, then the 17 question branches in a 1024-token block, padded to 4096) and
-caches the tensors. `test` additionally gets a `test_shuffled` cache for the
+encodes each CV/JD pair with every question (jev.encode: CV then JD truncated to
+STATE_BUDGET tokens, then the question branches in a QUESTIONS_BUDGET block, padded to
+their sum) and caches the tensors. `test` additionally gets a `test_shuffled` cache for the
 shuffled-pair control: each test CV paired with a job it is not paired with.
 
 Usage:
@@ -17,8 +17,8 @@ import argparse
 import random
 
 import common
+import corpus
 import jev
-from common import corpus
 
 
 class LeakageError(Exception):
@@ -40,7 +40,7 @@ def assert_leakage_free(splits):
         )
 
 
-def derange_pairs(pairs, all_job_ids, seed=42):
+def derange_pairs(pairs, all_job_ids, seed=corpus.DEFAULT_SEED):
     """Pairs every CV in `pairs` with a job it is not paired with there. The pool is
     the whole corpus: a split can be a full CV x job cross product, where no in-split
     permutation mismatches anything."""
@@ -88,6 +88,7 @@ def _pii_scan(datasets_dir):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     common.add_common_args(parser)
+    common.add_seed_arg(parser)
     args = common.parse_args(parser, "prepare")
 
     with common.stage_span("prepare"):

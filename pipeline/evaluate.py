@@ -22,8 +22,8 @@ import argparse
 import numpy as np
 
 import common
+import corpus
 import metrics
-from common import corpus
 
 
 def model_path(args):
@@ -80,20 +80,6 @@ def baselines(datasets_dir, train_pairs, eval_pairs, labels, targets, confidence
     }
 
 
-def _run_jevbench(model_path):
-    """Informational side-eval (specs §4); never blocks the stage."""
-    try:
-        import jevbench
-    except ImportError:
-        print("  JevBench: package not available -- skipped (informational only)")
-        return None
-    try:
-        return jevbench.run(model_path)
-    except Exception as exc:  # noqa: BLE001 -- API surface unverified; a side-eval must not fail the stage
-        print(f"  JevBench: run failed ({exc}) -- skipped (informational only)")
-        return None
-
-
 def _run(args):
     import mlflow
 
@@ -105,8 +91,7 @@ def _run(args):
                                      "n": 0, "skipped": True})
         return
 
-    path = model_path(args)
-    model = _load_model(args.stage, path)
+    model = _load_model(args.stage, model_path(args))
     calibration = load_calibration(args)
     temperature = common.temperature(calibration)
     scores, answer_confidences = common.read_scores(
@@ -136,11 +121,10 @@ def _run(args):
         "metrics": report_metrics,
         "baselines": (baselines(args.datasets_dir, train_cache["pairs"], cache["pairs"], labels,
                                 targets, confidences, floor) if train_cache is not None else {}),
-        "calibration": calibration,
+        "calibration": calibration or {},
         "bootstrap_mae_ci": metrics.bootstrap_mae_ci(scores, targets, confidences, floor,
                                                      [p["cv"] for p in cache["pairs"]]),
-        "shuffle_control": shuffled,
-        "jevbench": _run_jevbench(path) if args.run_jevbench else None,
+        "shuffle_control": shuffled or {},
     }
     common.write_json(out_path, report)
     print(f"evaluated {report['n']} pair(s) on split {args.split!r} -> {out_path}")
@@ -148,8 +132,8 @@ def _run(args):
     with common.mlflow_run(f"evaluate-{args.stage}", args) as run:
         mlflow.log_params({"split": args.split, "n_pairs": report["n"]})
         summary = {
-            "mean_mae": metrics.nanmean([m["mae"] for m in report_metrics.values()]),
-            "mean_abs_shift": metrics.nanmean([s["mean_abs_shift"] for s in shuffled.values()]) if shuffled else np.nan,
+            "mean_mae": metrics.mean_of(report_metrics, "mae"),
+            "mean_abs_shift": metrics.mean_of(shuffled, "mean_abs_shift") if shuffled else np.nan,
         }
         summary = {k: v for k, v in summary.items() if not np.isnan(v)}
         mlflow.log_metrics(summary)
@@ -165,9 +149,9 @@ def _run(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     common.add_common_args(parser)
+    common.add_inference_args(parser)
     parser.add_argument("--stage", required=True, choices=common.STAGES)
     parser.add_argument("--split", default="test")
-    parser.add_argument("--run-jevbench", action="store_true")
     args = common.parse_args(parser)
     with common.stage_span("evaluate"):
         _run(args)

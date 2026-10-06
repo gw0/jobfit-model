@@ -17,6 +17,7 @@ import jev
 from common import QUESTION_IDS, usable
 
 INSUFFICIENT_PERCENTILE = 10  # the least-confident 10% of calib answers read "insufficient data"
+EMPTY_CALIBRATION = {"temperature": math.nan, "confidence_threshold": math.nan}
 CONFIDENCE_BINS = 5
 
 
@@ -53,9 +54,9 @@ def per_question_mae(scores, targets, confidences, confidence_floor):
     return {qid: mae(p, t) for qid, p, t, _ in masked_columns(scores, targets, confidences, confidence_floor)}
 
 
-def mean_mae(scores, targets, confidences, confidence_floor):
-    """Mean over questions of the per-question MAE (questions with no labels skipped)."""
-    return nanmean(list(per_question_mae(scores, targets, confidences, confidence_floor).values()))
+def mean_of(per_question, key):
+    """Mean over questions of one entry of {question_id: {key: value}} (NaN skipped)."""
+    return nanmean([m[key] for m in per_question.values()])
 
 
 def compute_metrics(scores, targets, confidences, confidence_floor):
@@ -68,13 +69,14 @@ def compute_metrics(scores, targets, confidences, confidence_floor):
 
 # --- calibration ----------------------------------------------------------------------------
 
-def confidence_threshold(confidences, percentile=INSUFFICIENT_PERCENTILE):
+def confidence_threshold(confidences):
     """Nearest-rank percentile of answer confidences: less confident answers read
     "insufficient data" in the UI."""
     confidences = np.sort(np.asarray(confidences, dtype=float))
     if len(confidences) == 0:
         return math.nan
-    return float(confidences[min(len(confidences) - 1, max(0, math.ceil(percentile / 100 * len(confidences)) - 1))])
+    rank = math.ceil(INSUFFICIENT_PERCENTILE / 100 * len(confidences))
+    return float(confidences[min(len(confidences) - 1, max(0, rank - 1))])
 
 
 def fit_calibration(answer_logits, targets, confidences, confidence_floor):
@@ -90,7 +92,7 @@ def fit_calibration(answer_logits, targets, confidences, confidence_floor):
                                       [dists[:, j, :k] for j, k in enumerate(counts)],
                                       [weights[:, j] for j in range(len(counts))])
     if math.isnan(temperature):
-        return {"temperature": math.nan, "confidence_threshold": math.nan}
+        return EMPTY_CALIBRATION
     _, answer_confidences = common.read_scores(answer_logits, temperature)
     return {"temperature": temperature, "confidence_threshold": confidence_threshold(answer_confidences[weights > 0])}
 
@@ -174,4 +176,4 @@ def keyword_overlap_preds(train_overlaps, train_targets, train_confidences, conf
         else:
             slope, intercept = 0.0, (np.mean(t) if len(t) else math.nan)
         columns.append(slope * overlaps + intercept)
-    return np.stack(columns, axis=1) if columns else np.empty((len(overlaps), 0))
+    return np.stack(columns, axis=1)

@@ -20,8 +20,8 @@ def test_masked_columns_applies_nan_and_floor():
     confidences = np.array([[0.9] * Q, [0.9] * Q, [0.1] * Q])
     preds = np.arange(3 * Q, dtype=float).reshape(3, Q)
     columns = list(metrics.masked_columns(preds, targets, confidences, 0.3))
-    assert [aid for aid, *_ in columns] == QUESTION_IDS
-    aid, p, t, rows = columns[2]
+    assert [qid for qid, *_ in columns] == QUESTION_IDS
+    _, p, t, rows = columns[2]
     assert rows.tolist() == [True, False, False]
     assert p.tolist() == [2.0] and t.tolist() == [0.1]
 
@@ -40,11 +40,9 @@ def test_spearman():
     assert math.isnan(metrics.spearman(np.array([1.0, 1.0]), np.array([0.0, 1.0])))
 
 
-def test_mean_mae_skips_unlabeled_questions():
-    targets = _full(2, 0.2)
-    targets[:, 0] = np.nan
-    assert math.isclose(metrics.mean_mae(_full(2, 0.7), targets, _full(2, 1.0), 0.3), 0.5)
-    assert math.isnan(metrics.mean_mae(_full(2, 0.7), _full(2, np.nan), _full(2, 1.0), 0.3))
+def test_mean_of_skips_nan():
+    assert math.isclose(metrics.mean_of({"a": {"mae": 0.2}, "b": {"mae": math.nan}, "c": {"mae": 0.4}}, "mae"), 0.3)
+    assert math.isnan(metrics.mean_of({"a": {"mae": math.nan}}, "mae"))
 
 
 def test_confidence_threshold_nearest_rank():

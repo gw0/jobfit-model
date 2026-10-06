@@ -36,6 +36,8 @@ def validate(questions):
             raise ValueError(f"{qid}: score criteria must be a list of 2-{MAX_CANDIDATES} levels")
         if kind == "choice" and not (isinstance(criteria, dict) and 2 <= len(criteria) <= MAX_CANDIDATES):
             raise ValueError(f"{qid}: choice criteria must be an object of 2-{MAX_CANDIDATES} options")
+        if kind == "choice" and any(key.isdigit() for key in criteria):
+            raise ValueError(f"{qid}: choice option keys must not be integers (JS orders those numerically)")
         if kind == "noul" and not (isinstance(criteria, dict) and set(criteria) == {"true", "false"}):
             raise ValueError(f"{qid}: noul criteria must be exactly {{true, false}}")
 

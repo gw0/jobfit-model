@@ -95,6 +95,8 @@ def test_utilization_gauge_reader_failure_reads_zero():
 def _parse(tmp_path, *argv, stage=None):
     parser = argparse.ArgumentParser()
     common.add_common_args(parser)
+    common.add_inference_args(parser)
+    common.add_seed_arg(parser)
     parser.add_argument("--lr", type=float, default=1e-4)
     return common.parse_args(parser, stage, ["--datasets-dir", str(tmp_path), "--runs-dir", str(tmp_path), *argv])
 
@@ -247,7 +249,7 @@ def test_predict_answer_logits_batches_torch_and_onnx_sessions_alike():
              "segment_ids": torch.zeros(n, 4, dtype=torch.long), "answer_positions": torch.zeros(n, 2, dtype=torch.long),
              "candidate_ids": torch.zeros(2, 10, dtype=torch.long)}
 
-    class Model(torch.nn.Module):
+    class Model(torch.nn.Linear):
         def forward(self, input_ids, segment_ids, answer_positions, candidate_ids):
             return input_ids[:, :1, None].float().expand(-1, 2, 10)
 
@@ -256,6 +258,6 @@ def test_predict_answer_logits_batches_torch_and_onnx_sessions_alike():
             assert names == ["answer_logits"] and set(feeds) == {*common.MODEL_INPUTS, "candidate_ids"}
             return [np.broadcast_to(feeds["input_ids"][:, :1, None], (len(feeds["input_ids"]), 2, 10)).astype(float)]
 
-    for model in (Model(), Session()):
+    for model in (Model(1, 1), Session()):
         logits = common.predict_answer_logits(model, cache, batch_size=2)
         assert logits.shape == (n, 2, 10) and logits[:, 0, 0].tolist() == [0, 4, 8]
