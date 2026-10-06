@@ -7,7 +7,6 @@
     "resolveJsonModule": true,
     "allowJs": true,
     "strict": true,
-    "jsx": "preserve",
     "isolatedModules": true,
     "skipLibCheck": true,
     "noEmit": true,

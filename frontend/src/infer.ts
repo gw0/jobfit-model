@@ -1,10 +1,10 @@
 // In-browser inference (specs §7): transformers.js on WebGPU, falling back to WASM, and
 // pdf.js text extraction for uploaded CVs.
-import { AutoTokenizer, env, PreTrainedModel, Tensor } from "@huggingface/transformers";
+import { AutoTokenizer, env, PreTrainedModel } from "@huggingface/transformers";
 import * as pdfjsLib from "pdfjs-dist";
 
 import { answers, candidateIds, encode, type Answer, type Question } from "./jev.mjs";
-import { STATE_BUDGET, QUESTIONS_BUDGET } from "./jobfit.mjs";
+import { modelInputs, STATE_BUDGET, QUESTIONS_BUDGET } from "./jobfit.mjs";
 import { downloadTracker, type Calibration } from "./scoring";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -13,7 +13,10 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
 ).href;
 
 /** Called with the bytes downloaded so far and the total, summed over all model files. */
-export type ProgressCallback = (loadedBytes: number, totalBytes: number) => void;
+type ProgressCallback = (loadedBytes: number, totalBytes: number) => void;
+
+// The model URL names the model, so the id is only a placeholder transformers.js accepts.
+const MODEL_ID = "model";
 
 let modelPromise: ReturnType<typeof load> | null = null;
 
@@ -27,8 +30,6 @@ async function load(onProgress?: ProgressCallback) {
   const path = pathname.replace(/\/+$/, "");
   env.remoteHost = origin;
   env.remotePathTemplate = `${path}/`;
-  // The URL names the model, so the id is only a placeholder transformers.js accepts.
-  const MODEL_ID = "model";
 
   const tokenizer = await AutoTokenizer.from_pretrained(MODEL_ID, { progress_callback });
   // PreTrainedModel runs the exported JevModel graph generically: it passes our
@@ -41,16 +42,17 @@ async function load(onProgress?: ProgressCallback) {
   }
   // calibration.json is this project's own file, which transformers.js doesn't fetch.
   const calibration: Calibration = await (await fetch(`${origin}${path}/calibration.json`)).json();
-  return { modelUrl, tokenizer, model, calibration };
+  return { tokenizer, model, calibration };
 }
 
 /** Loads (once) and caches the tokenizer, model and calibration. */
 export function loadModel(onProgress?: ProgressCallback) {
-  if (!modelPromise) modelPromise = load(onProgress);
+  modelPromise ??= load(onProgress).catch((err) => {
+    modelPromise = null; // a failed load can be retried
+    throw err;
+  });
   return modelPromise;
 }
-
-const int64 = (values: number[], dims: number[]) => new Tensor("int64", BigInt64Array.from(values.map(BigInt)), dims);
 
 /**
  * The Jev call: one typed answer per question id, all from one forward pass. The state
@@ -59,22 +61,12 @@ const int64 = (values: number[], dims: number[]) => new Tensor("int64", BigInt64
 export async function evaluate(
   state: Record<string, string>,
   questions: Record<string, Question>,
-): Promise<{ model: string; answers: Record<string, Answer> }> {
-  const { modelUrl, tokenizer, model, calibration } = await loadModel();
+): Promise<Record<string, Answer>> {
+  const { tokenizer, model, calibration } = await loadModel();
   const encoded = encode(tokenizer, state, questions, STATE_BUDGET, QUESTIONS_BUDGET, tokenizer.pad_token_id ?? 0);
   const { ids } = candidateIds(tokenizer, questions);
-  const length = encoded.input_ids.length;
-  const numQuestions = ids.length;
-  const output = await model({
-    input_ids: int64(encoded.input_ids, [1, length]),
-    segment_ids: int64(encoded.segment_ids, [1, length]),
-    answer_positions: int64(encoded.answer_positions, [1, numQuestions]),
-    candidate_ids: int64(ids.flat(), [numQuestions, ids[0].length]),
-  });
-  return {
-    model: modelUrl,
-    answers: answers(questions, output.answer_logits.data as Float32Array, calibration.temperature ?? 1),
-  };
+  const output = await model(modelInputs(encoded, ids));
+  return answers(questions, output.answer_logits.data as Float32Array, calibration.temperature ?? 1);
 }
 
 // Deliberately basic (specs §7): getTextContent() with no layout reconstruction, to

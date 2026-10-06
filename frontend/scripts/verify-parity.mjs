@@ -10,9 +10,9 @@
 // Usage: node scripts/verify-parity.mjs [model-dir]   (default: public/models/default)
 import { readFileSync } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
-import { AutoTokenizer, env, PreTrainedModel, Tensor } from "@huggingface/transformers";
-import { answers, candidateIds, encode, MAX_CANDIDATES } from "../src/jev.mjs";
-import { STATE_BUDGET } from "../src/jobfit.mjs";
+import { AutoTokenizer, env, PreTrainedModel } from "@huggingface/transformers";
+import { answers, candidateIds, encode } from "../src/jev.mjs";
+import { modelInputs, QUESTIONS_BUDGET, STATE_BUDGET } from "../src/jobfit.mjs";
 
 const modelDir = resolve(process.argv[2] ?? new URL("../public/models/default", import.meta.url).pathname);
 env.allowRemoteModels = false;
@@ -25,6 +25,9 @@ const failures = [];
 const firstDiff = (a, b) => (a.length !== b.length ? Math.min(a.length, b.length) : a.findIndex((x, i) => x !== b[i]));
 
 if (STATE_BUDGET !== expected.state_budget) failures.push(`STATE_BUDGET ${STATE_BUDGET} != ${expected.state_budget}`);
+if (QUESTIONS_BUDGET !== expected.jobfit_questions_budget) {
+  failures.push(`QUESTIONS_BUDGET ${QUESTIONS_BUDGET} != ${expected.jobfit_questions_budget}`);
+}
 const tokenizer = await AutoTokenizer.from_pretrained(modelId);
 const padId = tokenizer.pad_token_id ?? 0;
 if (padId !== expected.pad_token_id) failures.push(`pad token id ${padId} != ${expected.pad_token_id}`);
@@ -41,15 +44,8 @@ for (const [name, actual, want] of [
 }
 console.log(`encoding: ${encoded.input_ids.length} ids, ${failures.length ? "MISMATCH" : "identical"}`);
 
-const int64 = (values, dims) => new Tensor("int64", BigInt64Array.from(values.map(BigInt)), dims);
 const model = await PreTrainedModel.from_pretrained(modelId, { dtype: "q8", device: "cpu" });
-const length = encoded.input_ids.length;
-const output = await model({
-  input_ids: int64(encoded.input_ids, [1, length]),
-  segment_ids: int64(encoded.segment_ids, [1, length]),
-  answer_positions: int64(encoded.answer_positions, [1, ids.length]),
-  candidate_ids: int64(ids.flat(), [ids.length, MAX_CANDIDATES]),
-});
+const output = await model(modelInputs(encoded, ids));
 const logits = Array.from(output.answer_logits.data, Number);
 const want = expected.answer_logits.flat();
 const maxDiff = logits.length === want.length ? Math.max(...logits.map((x, i) => Math.abs(x - want[i]))) : Infinity;

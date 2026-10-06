@@ -19,7 +19,16 @@ const toMb = (bytes: number) => (bytes / 1_000_000).toFixed(0);
 async function onCvFileChange(event: Event) {
   const file = (event.target as HTMLInputElement).files?.[0];
   if (!file) return;
-  cvText.value = await extractPdfText(file);
+  try {
+    cvText.value = await extractPdfText(file);
+  } catch (err) {
+    fail(err);
+  }
+}
+
+function fail(err: unknown) {
+  status.value = "error";
+  errorMessage.value = err instanceof Error ? err.message : String(err);
 }
 
 async function onSubmit() {
@@ -31,12 +40,11 @@ async function onSubmit() {
       download.value = { loaded, total };
     });
     status.value = "scoring";
-    const { answers } = await evaluate(jobfitState(cvText.value, jdText.value), questions);
+    const answers = await evaluate(jobfitState(cvText.value, jdText.value), questions);
     results.value = toResultRows(answers, questions, calibration);
     status.value = "idle";
   } catch (err) {
-    status.value = "error";
-    errorMessage.value = err instanceof Error ? err.message : String(err);
+    fail(err);
   }
 }
 </script>

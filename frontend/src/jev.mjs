@@ -15,8 +15,8 @@
  */
 
 export const MAX_CANDIDATES = 10;
-export const SEPARATOR = "\n\n---\n\n";
-export const ANSWER_PROMPT = "# Answer\n";
+const SEPARATOR = "\n\n---\n\n";
+const ANSWER_PROMPT = "# Answer\n";
 const CHOICE_LETTERS = "ABCDEFGHIJ";
 
 /** The answer keys, in candidate order: level indices, option keys, or true/false. */
@@ -45,7 +45,7 @@ export function renderQuestion(/** @type {Question} */ question) {
   return `${SEPARATOR}# Question\n${question.question}\n\n# Criteria\n${lines.join("\n")}\n\n${ANSWER_PROMPT}`;
 }
 
-export function renderPartHeader(/** @type {string} */ title, /** @type {boolean} */ first) {
+function renderPartHeader(/** @type {string} */ title, /** @type {boolean} */ first) {
   return (first ? "" : SEPARATOR) + `# ${title}\n`;
 }
 
@@ -121,7 +121,7 @@ export function encode(tokenizer, state, questions, stateBudget, questionsBudget
 }
 
 /** Softmax over the first `count` candidate logits. */
-export function probabilities(/** @type {ArrayLike<number>} */ logits, /** @type {number} */ count, temperature = 1) {
+function probabilities(/** @type {ArrayLike<number>} */ logits, /** @type {number} */ count, temperature = 1) {
   const z = Array.from(logits).slice(0, count).map((x) => Number(x) / temperature);
   const max = Math.max(...z);
   const exp = z.map((x) => Math.exp(x - max));
