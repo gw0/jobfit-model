@@ -8,7 +8,7 @@ JOBS_BY_COMPANY = {
     f"company-{i}": [f"jobs/company-{i}/job-{i}.md"] for i in range(8)
 }  # 8 companies, 1 job each
 
-# The production default ratios (70/10/10/10, tuned for ~100 real CVs) round every
+# The production default ratios (70/10/10/10, tuned for ~250 CVs) round every
 # non-train group to 0 on a fixture this small (round(0.1*5) == 0). Use ratios sized
 # for 5 CVs so every split gets at least one, to exercise all four groups here.
 FIXTURE_CV_RATIOS = (0.4, 0.2, 0.2, 0.2)  # -> 2, 1, 1, 1 of 5

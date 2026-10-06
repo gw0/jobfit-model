@@ -9,7 +9,7 @@ whole fit range without labeling every combination.
 
 Usage:
     ./data/build_dataset.py --out-dir datasets_smoke
-    ./data/build_dataset.py --out-dir datasets_full --jobs-per-cv 18
+    ./data/build_dataset.py --out-dir datasets_full --jobs-per-cv 20
 
 Reads <out-dir>/cvs/*.md and <out-dir>/jobs/<company>/*.md, writes
 <out-dir>/splits/{train,val,calib,test}.jsonl of {"cv": ..., "job": ...} path-ids.
@@ -26,7 +26,6 @@ import corpus
 
 DEFAULT_CV_RATIOS = (0.7, 0.1, 0.1, 0.1)   # train, val, calib, test
 DEFAULT_TEST_COMPANY_RATIO = 0.2
-DEFAULT_SEED = 42
 
 
 def _partition_by_ratio(items, ratios, rng):
@@ -66,7 +65,7 @@ def sample_jobs(cv_vector, job_ids, job_vectors, k, rng):
     return sorted(nearest + rng.sample(ranked[k // 2:], k - len(nearest)))
 
 
-def make_splits(cv_ids, jobs_by_company, seed=DEFAULT_SEED, cv_ratios=DEFAULT_CV_RATIOS,
+def make_splits(cv_ids, jobs_by_company, seed=corpus.DEFAULT_SEED, cv_ratios=DEFAULT_CV_RATIOS,
                 test_company_ratio=DEFAULT_TEST_COMPANY_RATIO, jobs_per_cv=None, texts=None):
     """Assigns every CV to one split and every company to either the test-only pool
     or the train/val/calib pool, then pairs each CV with the jobs of its pool: all of
@@ -100,7 +99,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--out-dir", type=Path, required=True)
     parser.add_argument("--jobs-per-cv", type=int, default=None, help="sample this many jobs per CV (default: all)")
-    parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
+    parser.add_argument("--seed", type=int, default=corpus.DEFAULT_SEED)
     args = parser.parse_args()
 
     cv_ids, jobs_by_company = corpus.list_cvs(args.out_dir), corpus.list_jobs(args.out_dir)
@@ -108,11 +107,7 @@ def main():
         raise SystemExit(f"no CVs found under {args.out_dir / 'cvs'}")
     if not jobs_by_company:
         raise SystemExit(f"no jobs found under {args.out_dir / 'jobs'}")
-    texts = None
-    if args.jobs_per_cv is not None:
-        texts = {cv_id: (args.out_dir / cv_id).read_text(encoding="utf-8") for cv_id in cv_ids}
-        texts.update({job_id: corpus.read_job_body(args.out_dir / job_id)
-                      for job_ids in jobs_by_company.values() for job_id in job_ids})
+    texts = corpus.load_texts(args.out_dir) if args.jobs_per_cv is not None else None
 
     splits = make_splits(cv_ids, jobs_by_company, seed=args.seed, jobs_per_cv=args.jobs_per_cv, texts=texts)
     for name, pairs in splits.items():

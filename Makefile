@@ -108,7 +108,7 @@ dataset:
 
 labels:
 	./data/label_dataset.py --out-dir $(DATASET) --workers $(WORKERS) --jobs-per-call $(JOBS_PER_CALL) \
-		--double-label --double-label-sample $(DOUBLE_LABEL_SAMPLE)
+		--double-label-sample $(DOUBLE_LABEL_SAMPLE)
 
 # --- pipeline, local (Docker) -------------------------------------------------------
 # The corpus is mounted read-only; every stage writes only into $(RUNS)/$(CANDIDATE)/.

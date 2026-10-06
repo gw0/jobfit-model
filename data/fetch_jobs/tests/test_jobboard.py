@@ -96,5 +96,5 @@ def test_write_post_redacts_emails(tmp_path):
 def test_save_posts_limit_caps_matching_posts(tmp_path):
     posts = [{"title": f"Engineer {i}", "company": "Acme", "url": f"https://x/{i}",
               "posted_at": "2026-06-15", "description": "d"} for i in range(5)]
-    assert jobboard.save_posts(posts, out_dir=tmp_path, limit=2)["new"] == 2
+    assert jobboard.save_posts(posts, out_dir=tmp_path, limit=2) == 2
     assert len(list((tmp_path / "acme").glob("*.md"))) == 2

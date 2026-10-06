@@ -2,23 +2,22 @@
 """Generates synthetic technical/SWE CVs via `claude -p` (specs §5).
 
 No real CVs are ever collected: each CV is LLM-generated directly as Markdown, then
-scanned with Presidio (pii_scrub.py) since generators do emit real-looking names.
+scanned with Presidio (pii_scrub.py) for leaked emails, phone numbers and the like.
 
 Usage:
     ./data/generate_cvs.py --count 10 --out-dir datasets_smoke
-    ./data/generate_cvs.py --count 300 --out-dir datasets_full --workers 8
+    ./data/generate_cvs.py --count 250 --out-dir datasets_full --workers 8
 
 Writes <out-dir>/cvs/<slug>.md. Needs an authenticated `claude` CLI in the calling shell.
 """
 
 import argparse
 import random
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import corpus
 import pii_scrub
-from claude_json import UsageLimitError, ask_json
+from claude_json import ask_json, run_parallel
 
 # The CV at index i gets profile(i): a seeded draw over these axes, so a batch is
 # varied (and a resumed batch continues it) without an extra LLM call. The role
@@ -56,7 +55,6 @@ WRITING_STYLES = [
     "terse, with sparse one-line bullets",
     "dense and somewhat disorganized, with inconsistent formatting",
 ]
-DEFAULT_SEED = 42
 
 PROMPT_TEMPLATE = """\
 Generate ONE synthetic, entirely fictional CV.
@@ -85,7 +83,7 @@ commentary before or after it, no tool use, with exactly these two keys:
 """
 
 
-def profile(index, seed=DEFAULT_SEED):
+def profile(index, seed=corpus.DEFAULT_SEED):
     """The prompt fields for the CV at `index`; the same for a given (index, seed)."""
     rng = random.Random(f"{seed}-{index}")
     role, stack = rng.choice(ROLE_FAMILIES)
@@ -96,16 +94,11 @@ def profile(index, seed=DEFAULT_SEED):
 
 
 def generate_one(fields):
-    try:
-        data = ask_json(PROMPT_TEMPLATE.format(**fields))
-        markdown = data["markdown"]
-        if not markdown.strip():
-            raise ValueError("empty markdown in response")
-        return corpus.slugify(data["name"]) or "cv", markdown
-    except UsageLimitError:
-        raise
-    except Exception as exc:  # noqa: BLE001
-        raise RuntimeError(f"failed to generate CV for profile {fields!r}: {exc}") from exc
+    data = ask_json(PROMPT_TEMPLATE.format(**fields))
+    markdown = data.get("markdown", "")
+    if not markdown.strip():
+        raise ValueError("no markdown in response")
+    return corpus.slugify(data.get("name", "")) or "cv", markdown
 
 
 def write_cv(out_dir, slug, markdown):
@@ -125,8 +118,7 @@ def main():
     parser.add_argument("--count", type=int, required=True, help="number of CVs to generate")
     parser.add_argument("--out-dir", type=Path, required=True)
     parser.add_argument("--workers", type=int, default=1, help="parallel `claude` calls")
-    parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
-    parser.add_argument("--skip-scrub", action="store_true", help="skip the Presidio PII scan")
+    parser.add_argument("--seed", type=int, default=corpus.DEFAULT_SEED)
     args = parser.parse_args()
 
     existing = corpus.list_cvs(args.out_dir)
@@ -136,21 +128,15 @@ def main():
             print(f"WARNING: {len(existing)} existing CVs exceed the requested --count {args.count}")
         return
 
-    # Files are written here on the main thread, so write_cv's name dedup can't race.
-    with ThreadPoolExecutor(max_workers=args.workers) as pool:
-        futures = {pool.submit(generate_one, profile(i, args.seed)): i for i in range(len(existing), args.count)}
-        for future in as_completed(futures):
-            try:
-                path = write_cv(args.out_dir, *future.result())
-            except UsageLimitError as exc:
-                pool.shutdown(cancel_futures=True)
-                raise SystemExit(f"{exc} -- stopped; re-run once it resets to generate the rest")
-            except RuntimeError as exc:
-                print(f"[{futures[future] + 1}/{args.count}] SKIPPED ({exc})")
-                continue
-            print(f"[{futures[future] + 1}/{args.count}] wrote {path}")
-            if not args.skip_scrub and not pii_scrub.scan_paths([path]):
-                print(f"  WARNING: PII findings in {path.name} (see above)")
+    def save(_, cv):
+        # Runs on the main thread, so write_cv's name dedup can't race.
+        path = write_cv(args.out_dir, *cv)
+        print(f"  wrote {path}")
+        if not pii_scrub.scan_paths([path]):
+            print(f"  WARNING: PII findings in {path.name} (see above)")
+
+    run_parallel("CV", range(len(existing), args.count),
+                 lambda i: generate_one(profile(i, args.seed)), args.workers, save)
 
     # Non-zero, so `make cvs dataset` doesn't go on to split an incomplete corpus.
     written = len(corpus.list_cvs(args.out_dir))

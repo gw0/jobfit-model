@@ -3,7 +3,7 @@ the AI-text detector's score, for one CV or job post."""
 
 import ai_text_detector
 from claude_json import ask_json
-from rubric import level_to_score, load_questions, rubric_text
+from rubric import ANSWER_FORMAT, answer_fields, load_questions, rubric_text
 
 DOC_LABELS = {"cv": "CV", "job": "job description"}
 CLARITY_QUESTION = {"cv": "cv_clarity_structure_quality", "job": "job_post_clarity_structure_quality"}
@@ -12,9 +12,7 @@ LLM_GENERATED_QUESTION = {"cv": "cv_likely_llm_generated", "job": "job_post_like
 CLARITY_PROMPT_TEMPLATE = """\
 You are an LLM judge answering a question about this {doc_label} text.
 
-Answer the question below with a level from its scale (a fractional level such as \
-2.5 is fine when the answer falls between two) and your confidence in that answer in \
-[0,1]:
+Answer the question below with {answer_format}:
 {rubric}
 
 {doc_label} text:
@@ -39,13 +37,9 @@ def label_doc(kind, doc_id, body, model=None, double_label=False):
     it adds nothing -- and the record is tagged with which model judged it."""
     qid = CLARITY_QUESTION[kind]
     question = load_questions(kind)[qid]
-    prompt = CLARITY_PROMPT_TEMPLATE.format(doc_label=DOC_LABELS[kind], rubric=rubric_text({qid: question}), text=body)
-    data = ask_json(prompt, model=model)
-    record = {
-        kind: doc_id,
-        f"{qid}_score": level_to_score(data["level"], question),
-        f"{qid}_confidence": float(data["confidence"]),
-    }
+    prompt = CLARITY_PROMPT_TEMPLATE.format(
+        doc_label=DOC_LABELS[kind], answer_format=ANSWER_FORMAT, rubric=rubric_text({qid: question}), text=body)
+    record = {kind: doc_id, **answer_fields(qid, question, ask_json(prompt, model=model))}
     if double_label:
         record["labeling_method"] = f"llm-judge:{model}"
     else:

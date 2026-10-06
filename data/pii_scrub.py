@@ -44,35 +44,25 @@ def _get_analyzer(spacy_model=DEFAULT_SPACY_MODEL):
     return AnalyzerEngine(nlp_engine=provider.create_engine())
 
 
-def scrub_text(text, threshold=DEFAULT_THRESHOLD, spacy_model=DEFAULT_SPACY_MODEL):
-    """Presidio findings in `text` at/above `threshold`, minus the known-fake emails."""
-    results = _get_analyzer(spacy_model).analyze(text=text, language="en", entities=SCAN_ENTITIES)
-    return [
-        r for r in results
-        if r.score >= threshold
-        and not (r.entity_type == "EMAIL_ADDRESS" and text[r.start:r.end].lower().endswith(FAKE_EMAIL_DOMAIN))
-    ]
-
-
-def format_finding(finding, text):
-    return f"{finding.entity_type} score={finding.score:.2f} text={text[finding.start:finding.end]!r}"
-
-
 def scan_paths(paths, threshold=DEFAULT_THRESHOLD, spacy_model=DEFAULT_SPACY_MODEL):
-    """Scans each file, or each .md under each directory, printing any findings.
-    Returns True if everything is clean."""
+    """Scans each file, or each .md under each directory, printing any findings at/above
+    `threshold` (known-fake emails excepted). Returns True if everything is clean."""
     clean = True
     for path in paths:
         if Path(path).is_dir():
             clean &= scan_paths(sorted(Path(path).rglob("*.md")), threshold, spacy_model)
             continue
         text = Path(path).read_text(encoding="utf-8")
-        findings = scrub_text(text, threshold=threshold, spacy_model=spacy_model)
+        findings = [
+            r for r in _get_analyzer(spacy_model).analyze(text=text, language="en", entities=SCAN_ENTITIES)
+            if r.score >= threshold
+            and not (r.entity_type == "EMAIL_ADDRESS" and text[r.start:r.end].lower().endswith(FAKE_EMAIL_DOMAIN))
+        ]
         if findings:
             clean = False
             print(f"{path}: {len(findings)} finding(s)")
-            for finding in findings:
-                print(f"  {format_finding(finding, text)}")
+            for f in findings:
+                print(f"  {f.entity_type} score={f.score:.2f} text={text[f.start:f.end]!r}")
     return clean
 
 

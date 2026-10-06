@@ -27,9 +27,11 @@ taking half of each CV's jobs from its nearest matches keeps the fit labels spre
 the whole scale instead of piling up near "no fit". The ~25 distinct `test` CVs, rather
 than ~1, are what make the bootstrap CIs over CV groups (specs §5) usable.
 
-Labeling makes one `claude -p` judge call per document and per pair: ~5.9k calls at
-full scale, Sonnet for the bulk pass and Opus for the 300-pair double-label QC, roughly
-8-12 hours with `--workers 8`. Every step keeps what already exists and the labeler
+Labeling makes one `claude -p` judge call per document and one per `--jobs-per-call`
+(10) pairs of a CV, ~1.5k calls at full scale: Sonnet for the bulk pass and Opus for the
+300-pair double-label QC (one pair per call).
+Document labels also run the local AI-text detector (`ai_text_detector.py`), and
+`generate_cvs.py` scans every CV with `pii_scrub.py`. Every step keeps what already exists and the labeler
 appends each record as its call returns; on the account's usage limit it stops at
 once, so an interrupted step resumes by re-running it after the reset. `datasets_full/` is committed once built:
 it is synthetic apart from the job posts (specs §10), and losing it would mean paying
@@ -38,12 +40,14 @@ for labeling again.
 ## Job-post redistribution: ToS review (specs §12, gate before going public)
 
 The curated `jobs/` corpus (`datasets_smoke/jobs/`, and `datasets_full/jobs/`)
-consists of individual public job-posting pages fetched from three third-party
+consists of individual public job-posting pages fetched from third-party
 applicant-tracking systems: Greenhouse (`job-boards.greenhouse.io`), Lever
-(`jobs.lever.co`), and Ashby (`jobs.ashbyhq.com`). Findings from a review done ahead
+(`jobs.lever.co`), Ashby (`jobs.ashbyhq.com`), and four Workday tenants (not covered by
+this review). `discover_*.py` and `fetch_generic.py` are standalone fetchers for job
+boards and arbitrary careers pages, run by hand and not part of `fetch_all.py`. Findings from a review done ahead
 of this gate (2026-09-23, not a substitute for real legal counsel):
 
-- **robots.txt**: none of the three disallow the job-listing paths this project
+- **robots.txt**: none of the three reviewed disallow the job-listing paths this project
   fetches from (`/<org>/jobs/*` on Greenhouse boards, `/<org>/*` on Lever, the
   individual job pages on Ashby -- Ashby's robots.txt only disallows `/meeting/`,
   `/b/`, `/api/`, none of which this project touches).

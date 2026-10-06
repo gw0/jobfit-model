@@ -7,12 +7,11 @@ import pytest
 
 import claude_json
 import label_pairs
-from claude_json import UsageLimitError
+from claude_json import UsageLimitError, extract_json_object, run_parallel
 from corpus import load_jsonl
-from label_dataset import _chunk_by_cv, _label_all, _label_file, singleton_chunks
+from label_dataset import _chunk_by_cv, _label_file
 from label_docs import detector_confidence
-from label_pairs import load_pairwise_questions
-from rubric import level_to_score, rubric_text
+from rubric import level_to_score, load_questions, rubric_text
 
 
 def _claude_prints(monkeypatch, returncode, event):
@@ -42,16 +41,33 @@ def test_other_claude_errors_are_retried_then_raised(monkeypatch):
     assert claude_json.ask_json("prompt") == {"a": 1}
 
 
-def test_label_all_stops_on_usage_limit_keeping_finished_records():
+def test_extract_json_object_unwraps_fences_and_prose():
+    assert extract_json_object('{"a": 1}') == {"a": 1}
+    assert extract_json_object('Here:\n```json\n{"a": "x\ny"}\n```') == {"a": "x\ny"}
+    with pytest.raises(ValueError, match="could not find"):
+        extract_json_object("no object here")
+
+
+def test_run_parallel_stops_on_usage_limit_keeping_finished_results():
     kept = []
 
-    def fn(chunk):
-        if chunk[0] >= 2:
+    def fn(i):
+        if i >= 2:
             raise UsageLimitError("session limit")
-        return chunk
+        return i
     with pytest.raises(SystemExit, match="session limit"):
-        _label_all("thing", [[0], [1], [2], [3], [4]], fn, on_record=kept.append)
+        run_parallel("thing", range(5), fn, 1, lambda item, result: kept.append(result))
     assert kept == [0, 1]
+
+
+def test_run_parallel_skips_individual_failures():
+    def fn(i):
+        if i == 2:
+            raise ValueError("bad reply")
+        return i
+    kept = []
+    assert run_parallel("thing", [1, 2, 3], fn, 1, lambda item, result: kept.append(result)) == 2
+    assert kept == [1, 3]
 
 
 def test_detector_confidence():
@@ -61,8 +77,7 @@ def test_detector_confidence():
 
 
 def test_pairwise_questions_and_criteria_in_rubric():
-    questions = load_pairwise_questions()
-    assert len(questions) == 13
+    questions = load_questions("pairwise")
     text = rubric_text(questions)
     assert all(qid in text and q["question"] in text and f"4 = {q['criteria'][4]}" in text
                for qid, q in questions.items())
@@ -79,7 +94,7 @@ def test_level_to_score():
 def test_label_pairs_for_cv_maps_levels_and_writes_null_not_nan(monkeypatch):
     monkeypatch.setattr(label_pairs, "ask_json",
                         lambda prompt, model=None: {"job_1": {"overall_fit": {"level": 3, "confidence": 0.8}}})
-    records = label_pairs.label_pairs_for_cv("cvs/a.md", "cv", [("jobs/x/1.md", "jd")], load_pairwise_questions())
+    records = label_pairs.label_pairs_for_cv("cvs/a.md", "cv", [("jobs/x/1.md", "jd")], load_questions("pairwise"))
     record = records[0]
     assert record["job"] == "jobs/x/1.md"
     assert record["overall_fit_score"] == 0.75 and record["overall_fit_confidence"] == 0.8
@@ -95,7 +110,7 @@ def test_label_pairs_for_cv_batched_reply_maps_each_job_independently(monkeypatc
     }
     monkeypatch.setattr(label_pairs, "ask_json", lambda prompt, model=None: reply)
     jobs = [("jobs/a.md", "a"), ("jobs/b.md", "b"), ("jobs/c.md", "c")]
-    records = label_pairs.label_pairs_for_cv("cvs/x.md", "cv", jobs, load_pairwise_questions())
+    records = label_pairs.label_pairs_for_cv("cvs/x.md", "cv", jobs, load_questions("pairwise"))
 
     assert [r["job"] for r in records] == [job_id for job_id, _ in jobs]
     assert records[0]["overall_fit_score"] == 1.0
@@ -110,42 +125,31 @@ def test_chunk_by_cv_never_mixes_cvs_and_respects_max_size():
     assert all(len({p["cv"] for p in chunk}) == 1 for chunk in chunks)  # no chunk spans two CVs
 
 
-def test_label_all_skips_individual_failures():
-    def fn(chunk):
-        if chunk[0] == 2:
-            raise ValueError("bad reply")
-        return chunk
-    assert _label_all("thing", [[1], [2], [3]], fn) == [1, 3]
-
-
-def test_label_all_raises_when_every_item_fails():
+def test_label_file_raises_when_every_item_fails(tmp_path):
     def fn(chunk):
         raise RuntimeError("not logged in")
-    with pytest.raises(SystemExit, match="every thing labeling call failed"):
-        _label_all("thing", [[1], [2]], fn)
-
-
-def test_label_all_empty_input_is_fine():
-    assert _label_all("thing", [], lambda chunk: chunk) == []
+    with pytest.raises(SystemExit, match="every CV labeling call failed"):
+        _label_file(tmp_path / "cvs.jsonl", "CV", [{"cv": "a"}, {"cv": "b"}], fn, force=False, workers=1)
 
 
 def test_label_file_appends_as_it_goes_and_resumes(tmp_path):
     path = tmp_path / "labels" / "cvs.jsonl"
-    key = lambda r: r["cv"]  # noqa: E731
 
     def crash_on_c(chunk):
-        if chunk[0] == "c":
+        if chunk[0]["cv"] == "c":
             raise KeyboardInterrupt  # an interrupted run: not a per-item failure
-        return [{"cv": chunk[0], "n": 1}]
+        return [{"cv": chunk[0]["cv"], "n": 1}]
 
     with pytest.raises(KeyboardInterrupt):
-        _label_file(path, "CV", ["a", "b", "c"], lambda i: i, key, crash_on_c,
-                    force=False, workers=1, chunk_fn=singleton_chunks)
+        _label_file(path, "CV", [{"cv": "a"}, {"cv": "b"}, {"cv": "c"}], crash_on_c, force=False, workers=1)
     assert [r["cv"] for r in load_jsonl(path)] == ["a", "b"]  # finished records survived
 
     calls = []
-    _label_file(path, "CV", ["c", "b", "a"], lambda i: i, key,
-                lambda chunk: calls.append(chunk[0]) or [{"cv": chunk[0], "n": 2}],
-                force=False, workers=2, chunk_fn=singleton_chunks)
+    items = [{"cv": "c"}, {"cv": "b"}, {"cv": "a"}]
+    _label_file(path, "CV", items, lambda chunk: calls.append(chunk[0]["cv"]) or [{"cv": chunk[0]["cv"], "n": 2}],
+                force=False, workers=2)
     assert calls == ["c"]
     assert [(r["cv"], r["n"]) for r in load_jsonl(path)] == [("c", 2), ("b", 1), ("a", 1)]  # items order
+
+    _label_file(path, "CV", items, lambda chunk: [{"cv": chunk[0]["cv"], "n": 3}], force=True, workers=1)
+    assert [(r["cv"], r["n"]) for r in load_jsonl(path)] == [("c", 3), ("b", 3), ("a", 3)]  # --force starts over

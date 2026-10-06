@@ -1,4 +1,4 @@
-"""AI-text detector for questions #14/#15 (CV / job post likely LLM-generated), applied
+"""AI-text detector for the cv_likely_llm_generated / job_post_likely_llm_generated questions, applied
 once per document instead of an LLM judge (specs §5).
 
 desklib/ai-text-detector-v1.01 (DeBERTa-v3-large, MIT), run locally on CPU. Chosen
@@ -38,7 +38,7 @@ def _get_model_and_tokenizer():
             self.classifier = nn.Linear(config.hidden_size, 1)
             self.post_init()
 
-        def forward(self, input_ids, attention_mask=None, labels=None):
+        def forward(self, input_ids, attention_mask=None):
             outputs = self.model(input_ids, attention_mask=attention_mask)
             last_hidden_state = outputs[0]
             input_mask_expanded = attention_mask.unsqueeze(-1).expand(last_hidden_state.size()).float()
@@ -55,21 +55,17 @@ def _get_model_and_tokenizer():
 
 def score_llm_generated(text):
     """Return the detector's raw P(machine-generated) in [0,1]."""
-    with _LOCK:
-        return _score(text)
-
-
-def _score(text):
     import torch
 
-    model, tokenizer = _get_model_and_tokenizer()
-    # padding=True (pad to this input's own length), not "max_length": the model
-    # card's own example always pads to 768 even for a one-sentence input, which
-    # measured ~6.5x slower on CPU for no accuracy benefit at batch size 1 -- the
-    # model attends over the same padded length regardless of content length.
-    encoded = tokenizer(
-        text, padding=True, truncation=True, max_length=MAX_LEN, return_tensors="pt",
-    )
-    with torch.no_grad():
-        logits = model(input_ids=encoded["input_ids"], attention_mask=encoded["attention_mask"])["logits"]
-    return torch.sigmoid(logits).item()
+    with _LOCK:
+        model, tokenizer = _get_model_and_tokenizer()
+        # padding=True (pad to this input's own length), not "max_length": the model
+        # card's own example always pads to 768 even for a one-sentence input, which
+        # measured ~6.5x slower on CPU for no accuracy benefit at batch size 1 -- the
+        # model attends over the same padded length regardless of content length.
+        encoded = tokenizer(
+            text, padding=True, truncation=True, max_length=MAX_LEN, return_tensors="pt",
+        )
+        with torch.no_grad():
+            logits = model(input_ids=encoded["input_ids"], attention_mask=encoded["attention_mask"])["logits"]
+        return torch.sigmoid(logits).item()

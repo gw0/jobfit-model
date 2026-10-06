@@ -7,11 +7,12 @@ Code session does not inherit that session's auth.
 """
 
 import json
-import re
 import shlex
 import subprocess
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
-DEFAULT_TIMEOUT_S = 180
+TIMEOUT_S = 180
+MAX_ATTEMPTS = 2
 
 
 class UsageLimitError(Exception):
@@ -27,7 +28,7 @@ def _debug(stdout, stderr, n=1200):
     return f"stdout: {stdout[-n:]!r}\nstderr: {stderr[-n:]!r}"
 
 
-def run_claude(prompt, model=None, timeout=DEFAULT_TIMEOUT_S):
+def run_claude(prompt, model=None):
     """Shell out to `claude -p`, return the assistant's final text.
 
     `--output-format json` prints a single JSON object -- the terminal
@@ -42,7 +43,7 @@ def run_claude(prompt, model=None, timeout=DEFAULT_TIMEOUT_S):
         cmd += f" --model {shlex.quote(model)}"
     proc = subprocess.run(
         ["bash", "-i", "-c", cmd],
-        capture_output=True, text=True, timeout=timeout,
+        capture_output=True, text=True, timeout=TIMEOUT_S,
     )
     result = _result_event(proc)
     if result.get("api_error_status") == 429:
@@ -54,6 +55,12 @@ def run_claude(prompt, model=None, timeout=DEFAULT_TIMEOUT_S):
     return result["result"]
 
 
+def _json_slice(text):
+    """The text from its first "{" to its last "}", or None if it has no such span."""
+    start, end = text.find("{"), text.rfind("}")
+    return text[start:end + 1] if 0 <= start < end else None
+
+
 def _result_event(proc):
     """The terminal "result" event claude prints, even when it exits non-zero."""
     # `bash -i` sources ~/.bashrc, which can print banner/prompt text and ANSI
@@ -62,12 +69,11 @@ def _result_event(proc):
     # pure JSON (an ANSI CSI sequence starts "\x1b[" but never "{", so this
     # needs no separate ANSI-stripping step).
     stdout, failed = proc.stdout, f"claude exited {proc.returncode}, " if proc.returncode else ""
-    start = stdout.find("{")
-    end = stdout.rfind("}")
-    if start == -1 or end == -1 or end < start:
+    payload = _json_slice(stdout)
+    if payload is None:
         raise RuntimeError(f"{failed}no JSON object found in claude output\n{_debug(stdout, proc.stderr)}")
     try:
-        result = json.loads(stdout[start:end + 1])
+        result = json.loads(payload)
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"{failed}could not parse claude output as JSON: {exc}\n"
                            f"{_debug(stdout, proc.stderr)}") from exc
@@ -77,8 +83,8 @@ def _result_event(proc):
 
 
 def extract_json_object(text):
-    """Parse `text` as JSON; fall back to pulling the first balanced {...} block
-    out of surrounding prose/code fences if the model didn't reply with pure JSON.
+    """Parse `text` as JSON; fall back to the span from its first "{" to its last "}"
+    if the model wrapped the object in prose or code fences.
 
     strict=False: model responses routinely contain literal (unescaped) newlines
     inside string fields rather than "\\n" -- standard real-world LLM JSON output,
@@ -88,31 +94,46 @@ def extract_json_object(text):
     try:
         return json.loads(text, strict=False)
     except json.JSONDecodeError:
-        pass
-
-    fenced = re.search(r"```(?:json)?\s*(\{.*\})\s*```", text, re.DOTALL)
-    if fenced:
-        return json.loads(fenced.group(1), strict=False)
-
-    start = text.find("{")
-    end = text.rfind("}")
-    if start != -1 and end != -1 and end > start:
-        return json.loads(text[start:end + 1], strict=False)
-
-    raise ValueError(f"could not find a JSON object in claude's response: {text[:200]!r}")
+        payload = _json_slice(text)
+        if payload is None:
+            raise ValueError(f"could not find a JSON object in claude's response: {text[:200]!r}") from None
+        return json.loads(payload, strict=False)
 
 
-def ask_json(prompt, model=None, timeout=DEFAULT_TIMEOUT_S, max_attempts=2):
+def ask_json(prompt, model=None):
     """Run `prompt` through claude and parse its reply as a JSON object, retrying
-    transient failures (a bad call or malformed reply) up to `max_attempts` times. A
+    transient failures (a bad call or malformed reply) up to MAX_ATTEMPTS times. A
     UsageLimitError is not transient and propagates at once."""
     last_exc = None
-    for _ in range(max_attempts):
+    for _ in range(MAX_ATTEMPTS):
         try:
-            raw = run_claude(prompt, model=model, timeout=timeout)
-            return extract_json_object(raw)
+            return extract_json_object(run_claude(prompt, model=model))
         except UsageLimitError:
             raise
         except Exception as exc:  # noqa: BLE001 -- retry loop, re-raised below
             last_exc = exc
-    raise RuntimeError(f"claude call failed after {max_attempts} attempt(s): {last_exc}")
+    raise RuntimeError(f"claude call failed after {MAX_ATTEMPTS} attempt(s): {last_exc}") from last_exc
+
+
+def run_parallel(what, items, fn, workers, on_result):
+    """Calls `fn(item)` for each item on `workers` threads and `on_result(item, result)`
+    on the calling thread as each finishes. A failed item is skipped (one bad reply
+    shouldn't lose the batch); the usage limit stops at once, keeping what was already
+    passed on. Returns how many items succeeded."""
+    done = 0
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(fn, item): item for item in items}
+        for n, future in enumerate(as_completed(futures), 1):
+            item = futures[future]
+            try:
+                result = future.result()
+            except UsageLimitError as exc:
+                pool.shutdown(cancel_futures=True)
+                raise SystemExit(f"{exc} -- stopped after {done} {what}(s); re-run once it resets to resume")
+            except Exception as exc:  # noqa: BLE001
+                print(f"[{n}/{len(items)}] {what} {item} SKIPPED ({exc})")
+                continue
+            done += 1
+            print(f"[{n}/{len(items)}] {what} {item} done")
+            on_result(item, result)
+    return done

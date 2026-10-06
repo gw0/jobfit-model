@@ -11,6 +11,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SPLIT_NAMES = ("train", "val", "calib", "test")
+DEFAULT_SEED = 42
 
 
 def load_questions():
@@ -34,6 +35,11 @@ def write_jsonl(path, records):
     with open(path, "w", encoding="utf-8") as f:
         for record in records:
             f.write(json.dumps(record, allow_nan=False) + "\n")
+
+
+def append_jsonl(path, record):
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(record, allow_nan=False) + "\n")
 
 
 def load_splits(datasets_dir):
@@ -92,3 +98,12 @@ def list_jobs(datasets_dir):
             if job_ids:
                 jobs_by_company[company_dir.name] = job_ids
     return jobs_by_company
+
+
+def load_texts(datasets_dir):
+    """{path-id: text} for every CV and job post (job posts without their frontmatter)."""
+    root = Path(datasets_dir)
+    texts = {cv_id: (root / cv_id).read_text(encoding="utf-8") for cv_id in list_cvs(root)}
+    texts.update({job_id: read_job_body(root / job_id)
+                  for job_ids in list_jobs(root).values() for job_id in job_ids})
+    return texts

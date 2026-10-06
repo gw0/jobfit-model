@@ -131,8 +131,7 @@ if __name__ == "__main__":
             continue
         for post in posts:
             post["company"] = name
-        result = jobboard.save_posts(posts, location=args.location, out_dir=args.out_dir, limit=args.max_per_company)
-        total += result["new"]
+        total += jobboard.save_posts(posts, location=args.location, out_dir=args.out_dir, limit=args.max_per_company)
 
     if args.count is not None and total < args.count:
         print(f"WARNING: only reached {total}/{args.count} jobs after exhausting all companies", file=sys.stderr)

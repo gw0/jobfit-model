@@ -57,7 +57,6 @@ def request(method, url, **kwargs):
             continue
         resp.raise_for_status()
         return resp
-    raise RuntimeError(f"unreachable: exhausted retries for {url}")
 
 
 def extract_slug(target):
@@ -79,6 +78,8 @@ def to_markdown(html_content):
 # ---------------------------------------------------------------------------
 
 def _find_existing(folder, url):
+    if not url:
+        return None
     for md_path in folder.glob("*.md"):
         if parse_frontmatter(md_path.read_text(encoding="utf-8"))[0].get("url") == url:
             return md_path
@@ -220,26 +221,19 @@ def parse_cli(*, target=False, sector=False, count=False):
 
 def save_posts(posts, out_dir, location=None, limit=None):
     """Apply location filtering, write up to `limit` matching posts, and print a
-    one-line summary.
+    one-line summary. Returns the number of new posts.
 
     posts arriving here are already role-matched (fetch/discover apply include/exclude
     themselves), so this only checks location before writing.
     """
-    matched = 0
-    written_new = 0
-    written_updated = 0
-
+    matched = new = 0
     for post in posts:
         if not matches(post, location=location):
             continue
         if matched == limit:
             break
         matched += 1
-        _, is_new = write_post(post, jobs_root=out_dir)
-        if is_new:
-            written_new += 1
-        else:
-            written_updated += 1
+        new += write_post(post, jobs_root=out_dir)[1]
 
-    print(f"matched {matched}, written {written_new} new / {written_updated} updated")
-    return {"matched": matched, "new": written_new, "updated": written_updated}
+    print(f"matched {matched}, written {new} new / {matched - new} updated")
+    return new
