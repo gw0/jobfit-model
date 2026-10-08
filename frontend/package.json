@@ -2,6 +2,8 @@
   "name": "jobfit-frontend",
   "private": true,
   "version": "0.1.0",
+  "description": "A CV/job-post fit-scoring web app, private in your browser.",
+  "license": "AGPL-3.0-or-later",
   "type": "module",
   "scripts": {
     "dev": "vite",
