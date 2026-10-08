@@ -1,0 +1,410 @@
+{
+  "git_sha": "e418ab5eae994a5bc2cf14345d5e4822d23d9d08",
+  "candidate": "smollm2-135m-instruct",
+  "model": "HuggingFaceTB/SmolLM2-135M-Instruct",
+  "settings": {
+    "confidence_floor": 0.3,
+    "batch_size": 16,
+    "seed": 42,
+    "epochs": 5,
+    "lr": 0.0004,
+    "lora_rank": 8,
+    "lora_alpha": 16,
+    "lora_layers": 8
+  },
+  "winner": "smollm2-135m-instruct",
+  "candidates": {
+    "qwen3-0.6b-qint8all": {
+      "zeroshot": 0.28704580268649815,
+      "finetuned": 0.13093291858096034,
+      "calibrated": 0.13152180315477965,
+      "quantized": 0.2930908513988164
+    },
+    "smollm2-135m-instruct": {
+      "zeroshot": 0.30628415750272664,
+      "finetuned": 0.1545163586897843,
+      "calibrated": 0.15481009331673,
+      "quantized": 0.15681952049333006
+    },
+    "smollm2-135m-instruct-bs4-lr0001-qint8all": {
+      "zeroshot": 0.30628416037283596,
+      "finetuned": 0.19150967112207598,
+      "calibrated": 0.19189532957410968,
+      "quantized": 0.2901322332030749
+    }
+  },
+  "n_pairs": 500,
+  "quality": {
+    "zeroshot": {
+      "mean_mae": 0.30628415750272664,
+      "beats_floor_count": 3,
+      "n_questions": 17,
+      "shuffle_mean_abs_shift": 0.044351569649852825
+    },
+    "finetuned": {
+      "mean_mae": 0.1545163586897843,
+      "beats_floor_count": 15,
+      "n_questions": 17,
+      "shuffle_mean_abs_shift": 0.1266655227064633
+    },
+    "calibrated": {
+      "mean_mae": 0.15481009331673,
+      "beats_floor_count": 15,
+      "n_questions": 17,
+      "shuffle_mean_abs_shift": 0.12421553301011933
+    },
+    "quantized": {
+      "mean_mae": 0.15681952049333006,
+      "beats_floor_count": 15,
+      "n_questions": 17,
+      "shuffle_mean_abs_shift": 0.13452639127379418
+    }
+  },
+  "baselines": {
+    "train_mean": 0.20456987274285848,
+    "keyword_overlap": 0.1960804909774268
+  },
+  "shipped_stage": "quantized",
+  "questions": {
+    "skills_match": {
+      "mae": 0.14788402912569973,
+      "mae_ci": [
+        0.13538148522578805,
+        0.16083372444806737
+      ],
+      "floor_mae": 0.22243,
+      "spearman_rho": 0.5980560276609074,
+      "confidence_error_spearman": -0.38366860667442665,
+      "insufficient_rate": 0.064
+    },
+    "experience_level_match": {
+      "mae": 0.21609102446143585,
+      "mae_ci": [
+        0.19387977841897946,
+        0.23997992078083616
+      ],
+      "floor_mae": 0.2876575714285715,
+      "spearman_rho": 0.5505371124873972,
+      "confidence_error_spearman": -0.32322340489361956,
+      "insufficient_rate": 0.452
+    },
+    "domain_industry_relevance": {
+      "mae": 0.1484880090760488,
+      "mae_ci": [
+        0.13323170664743655,
+        0.16650293467483507
+      ],
+      "floor_mae": 0.17004459691252144,
+      "spearman_rho": 0.4321365430733301,
+      "confidence_error_spearman": -0.1561565286261145,
+      "insufficient_rate": 0.026
+    },
+    "education_qualifications_match": {
+      "mae": 0.16878137424128567,
+      "mae_ci": [
+        0.15531147411127177,
+        0.1824115002831507
+      ],
+      "floor_mae": 0.20630817610062893,
+      "spearman_rho": 0.5046282240756016,
+      "confidence_error_spearman": -0.2038987675950704,
+      "insufficient_rate": 0.106
+    },
+    "seniority_role_level_fit": {
+      "mae": 0.1847257338608344,
+      "mae_ci": [
+        0.16830884473471963,
+        0.20067011856845068
+      ],
+      "floor_mae": 0.2191038857142857,
+      "spearman_rho": 0.48833908426356604,
+      "confidence_error_spearman": -0.18022084888339554,
+      "insufficient_rate": 0.098
+    },
+    "career_trajectory_fit": {
+      "mae": 0.14851099527349423,
+      "mae_ci": [
+        0.13626279127780594,
+        0.1616448275379964
+      ],
+      "floor_mae": 0.1961754,
+      "spearman_rho": 0.5417463207211451,
+      "confidence_error_spearman": -0.35920338881355524,
+      "insufficient_rate": 0.048
+    },
+    "responsibilities_overlap": {
+      "mae": 0.15380742300959807,
+      "mae_ci": [
+        0.14383359677914734,
+        0.16469496515043439
+      ],
+      "floor_mae": 0.219692,
+      "spearman_rho": 0.5491163680065214,
+      "confidence_error_spearman": -0.3004110256441026,
+      "insufficient_rate": 0.098
+    },
+    "location_work_arrangement_fit": {
+      "mae": 0.21348329196651847,
+      "mae_ci": [
+        0.19016135135480233,
+        0.2435648167678051
+      ],
+      "floor_mae": 0.2429140423704552,
+      "spearman_rho": 0.3049530562153185,
+      "confidence_error_spearman": 0.010952107808431233,
+      "insufficient_rate": 0.542
+    },
+    "soft_skills_match": {
+      "mae": 0.1438921265955817,
+      "mae_ci": [
+        0.13432552000195472,
+        0.15407931205816403
+      ],
+      "floor_mae": 0.16601342857142856,
+      "spearman_rho": 0.5313919393636274,
+      "confidence_error_spearman": -0.10763764655058619,
+      "insufficient_rate": 0.002
+    },
+    "recency_of_relevant_experience": {
+      "mae": 0.22563185257561494,
+      "mae_ci": [
+        0.20748267329453093,
+        0.24463006675067345
+      ],
+      "floor_mae": 0.3492157142857143,
+      "spearman_rho": 0.546914711903677,
+      "confidence_error_spearman": -0.4296073824295297,
+      "insufficient_rate": 0.518
+    },
+    "cv_clarity_structure_quality": {
+      "mae": 0.07401526330354533,
+      "mae_ci": [
+        0.0578078445221915,
+        0.09176259929412815
+      ],
+      "floor_mae": 0.055,
+      "spearman_rho": 0.49349986333728096,
+      "confidence_error_spearman": 0.13109898839595358,
+      "insufficient_rate": 0.0
+    },
+    "job_post_clarity_structure_quality": {
+      "mae": 0.059349806927556224,
+      "mae_ci": [
+        0.056248085319317596,
+        0.06198107904276249
+      ],
+      "floor_mae": 0.052776171428571474,
+      "spearman_rho": 0.247759115310696,
+      "confidence_error_spearman": 0.30059841839367357,
+      "insufficient_rate": 0.0
+    },
+    "overall_fit": {
+      "mae": 0.132636638258725,
+      "mae_ci": [
+        0.12296412879270652,
+        0.14322918412068406
+      ],
+      "floor_mae": 0.17728980000000003,
+      "spearman_rho": 0.5494273887577015,
+      "confidence_error_spearman": -0.35329331717326873,
+      "insufficient_rate": 0.002
+    },
+    "cv_likely_llm_generated": {
+      "mae": 0.12494243743066741,
+      "mae_ci": [
+        0.09433636555589095,
+        0.15834326006980828
+      ],
+      "floor_mae": 0.2383589520840437,
+      "spearman_rho": 0.7119311956812326,
+      "confidence_error_spearman": -0.5335793503174012,
+      "insufficient_rate": 0.292
+    },
+    "job_post_likely_llm_generated": {
+      "mae": 0.2894498927467953,
+      "mae_ci": [
+        0.27188585094544954,
+        0.30454430797886506
+      ],
+      "floor_mae": 0.37945293406030667,
+      "spearman_rho": 0.4156916238512485,
+      "confidence_error_spearman": -0.3897189090811406,
+      "insufficient_rate": 0.563855421686747
+    },
+    "interview_readiness": {
+      "mae": 0.11782752451256222,
+      "mae_ci": [
+        0.10703896006776109,
+        0.12876540869643008
+      ],
+      "floor_mae": 0.16602105714285717,
+      "spearman_rho": 0.5540175894597823,
+      "confidence_error_spearman": -0.49829316117264466,
+      "insufficient_rate": 0.002
+    },
+    "culture_company_alignment": {
+      "mae": 0.11641442502064774,
+      "mae_ci": [
+        0.10824905956948781,
+        0.12492938494763714
+      ],
+      "floor_mae": 0.12923410652920964,
+      "spearman_rho": 0.4388776225225273,
+      "confidence_error_spearman": 0.051552398209592835,
+      "insufficient_rate": 0.0
+    }
+  },
+  "calibration": {
+    "calibrated": {
+      "skills_match": {
+        "confidence_error_spearman": -0.3835842223368893,
+        "insufficient_rate": 0.054
+      },
+      "experience_level_match": {
+        "confidence_error_spearman": -0.361311749246997,
+        "insufficient_rate": 0.472
+      },
+      "domain_industry_relevance": {
+        "confidence_error_spearman": -0.217564230256921,
+        "insufficient_rate": 0.018
+      },
+      "education_qualifications_match": {
+        "confidence_error_spearman": -0.23560366241464967,
+        "insufficient_rate": 0.11
+      },
+      "seniority_role_level_fit": {
+        "confidence_error_spearman": -0.24500171600686402,
+        "insufficient_rate": 0.058
+      },
+      "career_trajectory_fit": {
+        "confidence_error_spearman": -0.33986583946335785,
+        "insufficient_rate": 0.008
+      },
+      "responsibilities_overlap": {
+        "confidence_error_spearman": -0.3343699134796539,
+        "insufficient_rate": 0.056
+      },
+      "location_work_arrangement_fit": {
+        "confidence_error_spearman": 0.035985935943743774,
+        "insufficient_rate": 0.542
+      },
+      "soft_skills_match": {
+        "confidence_error_spearman": -0.16638239352957412,
+        "insufficient_rate": 0.002
+      },
+      "recency_of_relevant_experience": {
+        "confidence_error_spearman": -0.4441586406345625,
+        "insufficient_rate": 0.504
+      },
+      "cv_clarity_structure_quality": {
+        "confidence_error_spearman": 0.06705108420433682,
+        "insufficient_rate": 0.0
+      },
+      "job_post_clarity_structure_quality": {
+        "confidence_error_spearman": 0.3435939183756735,
+        "insufficient_rate": 0.0
+      },
+      "overall_fit": {
+        "confidence_error_spearman": -0.37085485941943763,
+        "insufficient_rate": 0.002
+      },
+      "cv_likely_llm_generated": {
+        "confidence_error_spearman": -0.5667120588482354,
+        "insufficient_rate": 0.25
+      },
+      "job_post_likely_llm_generated": {
+        "confidence_error_spearman": -0.4866927576526844,
+        "insufficient_rate": 0.5614457831325301
+      },
+      "interview_readiness": {
+        "confidence_error_spearman": -0.4496154944619778,
+        "insufficient_rate": 0.002
+      },
+      "culture_company_alignment": {
+        "confidence_error_spearman": -0.09887329149316597,
+        "insufficient_rate": 0.0
+      }
+    },
+    "quantized": {
+      "skills_match": {
+        "confidence_error_spearman": -0.38366860667442665,
+        "insufficient_rate": 0.064
+      },
+      "experience_level_match": {
+        "confidence_error_spearman": -0.32322340489361956,
+        "insufficient_rate": 0.452
+      },
+      "domain_industry_relevance": {
+        "confidence_error_spearman": -0.1561565286261145,
+        "insufficient_rate": 0.026
+      },
+      "education_qualifications_match": {
+        "confidence_error_spearman": -0.2038987675950704,
+        "insufficient_rate": 0.106
+      },
+      "seniority_role_level_fit": {
+        "confidence_error_spearman": -0.18022084888339554,
+        "insufficient_rate": 0.098
+      },
+      "career_trajectory_fit": {
+        "confidence_error_spearman": -0.35920338881355524,
+        "insufficient_rate": 0.048
+      },
+      "responsibilities_overlap": {
+        "confidence_error_spearman": -0.3004110256441026,
+        "insufficient_rate": 0.098
+      },
+      "location_work_arrangement_fit": {
+        "confidence_error_spearman": 0.010952107808431233,
+        "insufficient_rate": 0.542
+      },
+      "soft_skills_match": {
+        "confidence_error_spearman": -0.10763764655058619,
+        "insufficient_rate": 0.002
+      },
+      "recency_of_relevant_experience": {
+        "confidence_error_spearman": -0.4296073824295297,
+        "insufficient_rate": 0.518
+      },
+      "cv_clarity_structure_quality": {
+        "confidence_error_spearman": 0.13109898839595358,
+        "insufficient_rate": 0.0
+      },
+      "job_post_clarity_structure_quality": {
+        "confidence_error_spearman": 0.30059841839367357,
+        "insufficient_rate": 0.0
+      },
+      "overall_fit": {
+        "confidence_error_spearman": -0.35329331717326873,
+        "insufficient_rate": 0.002
+      },
+      "cv_likely_llm_generated": {
+        "confidence_error_spearman": -0.5335793503174012,
+        "insufficient_rate": 0.292
+      },
+      "job_post_likely_llm_generated": {
+        "confidence_error_spearman": -0.3897189090811406,
+        "insufficient_rate": 0.563855421686747
+      },
+      "interview_readiness": {
+        "confidence_error_spearman": -0.49829316117264466,
+        "insufficient_rate": 0.002
+      },
+      "culture_company_alignment": {
+        "confidence_error_spearman": 0.051552398209592835,
+        "insufficient_rate": 0.0
+      }
+    }
+  },
+  "calibration_params": {
+    "temperature": 1.1337322704707236,
+    "confidence_threshold": 0.4279075275567533
+  },
+  "deployability": {
+    "onnx_fp32_bytes": 539249642,
+    "onnx_quantized_bytes": 136558068
+  },
+  "limitations": [
+    "The test split covers few distinct CV profiles, so candidate-axis generalisation is the weakest claim here; read the per-question table with its bootstrap CIs, not the mean as a point estimate."
+  ]
+}
