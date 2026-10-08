@@ -17,7 +17,7 @@
 .PHONY: venv build test smoke fetch-check \
 	jobs cvs dataset labels \
 	local-prepare local-zeroshot local-finetune local-calibrate local-export local-publish \
-	copy-model frontend-check \
+	frontend-build copy-model frontend-check \
 	cluster-up cluster-secrets cluster-down cluster-check cluster-logs cluster-mlflow cluster-run \
 	push-hf-model push-hf-frontend push-wandb-report
 
@@ -80,10 +80,10 @@ build:
 	docker build -t jobfit-pipeline -f docker/pipeline.Dockerfile --build-arg GIT_SHA=$$(git rev-parse HEAD) .
 	docker build -t jobfit-frontend -f docker/frontend.Dockerfile .
 
-test:
+test: frontend-build
 	$(PY) -m pytest -q
 	@! grep -n "Mozilla" data/fetch_jobs/*.py || { echo "spoofed browser User-Agent in data/fetch_jobs" >&2; exit 1; }
-	cd frontend && $(NPM) install && $(NPM) run build && $(NPM) run test
+	cd frontend && $(NPM) run test
 
 smoke: test
 	$(MAKE) SCALE=smoke fetch-check cvs dataset labels local-publish frontend-check cluster-run
@@ -148,13 +148,22 @@ copy-model:
 	mkdir -p frontend/public/models
 	cp -r $(RUNS)/$(CANDIDATE)/export/web frontend/public/models/default
 
-frontend-check: local-export copy-model
-	cd frontend && $(NPM) install
-	node frontend/scripts/verify-parity.mjs frontend/public/models/default
-	docker run --rm -d --name $(FRONTEND_CHECK_NAME) jobfit-frontend
-	for i in 1 2 3 4 5; do \
-		docker exec $(FRONTEND_CHECK_NAME) wget -qO /dev/null http://127.0.0.1:8080/ && status=0 && break; \
-		status=$$?; sleep 1; \
+frontend-build:
+	cd frontend && $(NPM) install && $(NPM) run build
+
+# Parity against the pipeline export, then the image serving the app, its config.json and the
+# export mounted as the default model.
+frontend-check: local-export frontend-build
+	node frontend/scripts/verify-parity.mjs $(RUNS)/$(CANDIDATE)/export/web
+	docker run --rm -d --name $(FRONTEND_CHECK_NAME) \
+		-v $(CURDIR)/$(RUNS)/$(CANDIDATE)/export/web:/usr/share/nginx/html/models/default:ro jobfit-frontend
+	status=0; \
+	for path in / /config.json /models/default/config.json; do \
+		for i in 1 2 3 4 5; do \
+			docker exec $(FRONTEND_CHECK_NAME) wget -qO /dev/null http://127.0.0.1:8080$$path && continue 2; \
+			sleep 1; \
+		done; \
+		echo "frontend: $$path not served" >&2; status=1; \
 	done; \
 	[ $$status != 0 ] || echo "frontend served OK"; \
 	docker stop $(FRONTEND_CHECK_NAME); exit $$status
@@ -277,12 +286,12 @@ cluster-run: build
 # --- publishing: .env.publish holds HF_TOKEN (write) and, for the W&B report, WANDB_API_KEY;
 # it may also set HF_MODEL_REPO (default gw0/jobfit-model) and HF_SPACE_REPO (default gw0/jobfit-app)
 
-PUBLISH := set -a; . ./.env.publish; set +a;
+PUBLISH := set -a; . ./.env.publish; set +a; export WANDB_DIR=$(CURDIR)/.cache;
 
 push-hf-model:
 	$(PUBLISH) ./pipeline/publish.py --datasets-dir $(DATASET) --runs-dir $(RUNS) --model $(MODEL) --candidate $(CANDIDATE) --push-hf
 
-push-hf-frontend:
+push-hf-frontend: frontend-build
 	$(PUBLISH) frontend/scripts/push-hf-frontend.sh
 
 push-wandb-report:
