@@ -16,6 +16,7 @@ committed, so candidates trained on different hosts stay comparable.
 import argparse
 import os
 from pathlib import Path
+from string import Template
 
 import common
 import report as report_lib
@@ -98,33 +99,17 @@ def register(run_id, candidate, winner):
 def build_model_card(report, repo_id):
     licence = BASE_MODEL_LICENSES.get(common.model_slug(report["model"]))
     quantized = report["quality"]["quantized"]
-    lines = [
-        "---",
-        f"base_model: {report['model']}",
-        f"license: {licence or 'other'}",
-        "tags:", "- jobfit", "- cv-job-fit-scoring", "- typed-decision",
-        "---",
-        "",
-        f"# {repo_id}",
-        "",
-        "CV/job-description fit-scoring model from the [JobFit](https://github.com/gw0/jobfit-model) "
-        "project; see its `runs_<scale>/<candidate>/reports/` for the full benchmark report. It is a "
-        "Jev-shaped typed-decision model: a state plus typed questions (score / choice / noul) "
-        "in, one typed answer per question out, each read off the causal LM's own `lm_head` "
-        "in one masked forward pass.",
-        "",
-        f"- base model: `{report['model']}`" + ("" if licence else " -- licence per model card, verify before use"),
-        f"- git SHA: `{report['git_sha']}`",
-        f"- mean MAE (quantized, `test`): {report_lib.fmt(quantized['mean_mae'])}",
-        f"- beats train-mean floor on {quantized['beats_floor_count']}/{quantized['n_questions']} questions",
-        "",
-        "Ships as dynamic-int8 ONNX for [transformers.js](https://github.com/huggingface/transformers.js), "
-        "loaded through the generic `PreTrainedModel` class. The graph takes `input_ids`, "
-        "`segment_ids`, `answer_positions` and `candidate_ids` and returns `answer_logits`; "
-        "`calibration.json` holds the model's temperature and JobFit's insufficient-data "
-        "confidence threshold.",
-    ]
-    return "\n".join(lines) + "\n"
+    template = Template((Path(__file__).parent / "hf-model-readme.md").read_text(encoding="utf-8"))
+    return template.substitute(
+        repo_id=repo_id,
+        base_model=report["model"],
+        license=licence or "other",
+        licence_note="" if licence else " -- licence per model card, verify before use",
+        git_sha=report["git_sha"],
+        mean_mae=report_lib.fmt(quantized["mean_mae"]),
+        beats=quantized["beats_floor_count"],
+        n_questions=quantized["n_questions"],
+    )
 
 
 def push_hf(report, web_dir, repo_id, private):

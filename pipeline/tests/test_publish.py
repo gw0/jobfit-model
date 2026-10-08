@@ -69,6 +69,7 @@ def test_render_markdown_calibration_mean():
     assert math.isclose(rows["calibrated"]["mean_insufficient_rate"], (0.1 * 16 + 1.0) / 17)
     assert math.isclose(rows["calibrated"]["mean_confidence_error_spearman"], -0.4)
     md = report.render_markdown(built)
+    assert md.count("img.shields.io") == 5 and "datasets/gw0/jobfit-jevbench" in md
     assert "temperature 1.5000" in md and "n/a" in md  # stages without results
 
 
@@ -78,6 +79,9 @@ def test_model_card():
     card = publish.build_model_card(built, "gw0/jobfit-model")
     assert card.startswith("---\n") and "license: apache-2.0" in card
     assert "abc123" in card and "12/17 questions" in card
+    assert "library_name: transformers.js" in card and "datasets/gw0/jobfit-jevbench" in card
+    assert "$" not in card
+    assert "github.com/gw0/jobfit-model" in card and "spaces/gw0/jobfit-app" in card
 
     built = report.assemble_report("minicpm5-2b", "openbmb/MiniCPM5-2B", "abc123",
                                    {"minicpm5-2b": {"quantized": _eval_result(0.2, 0.25, 12)}}, {}, None, {})

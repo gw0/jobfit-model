@@ -18,7 +18,7 @@ FRONTEND_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 printf '{"modelUrl": "%s"}\n' "$JOBFIT_MODEL_URL" > "$FRONTEND_DIR/dist/config.json"
 
-cp "$FRONTEND_DIR/space-readme.md" "$FRONTEND_DIR/dist/README.md"
+cp "$FRONTEND_DIR/hf-space-readme.md" "$FRONTEND_DIR/dist/README.md"
 
 python3 - "$FRONTEND_DIR/dist" "$HF_SPACE_REPO" <<'PYEOF'
 import sys
