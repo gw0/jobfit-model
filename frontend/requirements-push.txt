@@ -1,0 +1,2 @@
+# Python dependency of frontend/scripts/push-hf-frontend.sh (what the cd workflow installs).
+huggingface_hub

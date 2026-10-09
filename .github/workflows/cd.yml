@@ -1,0 +1,32 @@
+name: cd
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+concurrency: cd
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+  frontend:
+    needs: ci
+    runs-on: ubuntu-latest
+    environment: hf
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: pip install -q -r frontend/requirements-push.txt
+      - run: make frontend-build
+      - run: frontend/scripts/push-hf-frontend.sh
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
