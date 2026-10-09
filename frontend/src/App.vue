@@ -53,7 +53,15 @@ async function onSubmit() {
   <section class="section">
     <div class="container">
       <h1 class="title">JobFit</h1>
-      <p class="subtitle">Paste a CV and job description for calibrated fit scores -- scoring runs entirely in your browser.</p>
+      <p class="mb-3">
+        <a href="https://github.com/gw0/jobfit-model"><img src="https://img.shields.io/badge/GitHub-gw0%2Fjobfit--model-181717?logo=github" alt="GitHub" /></a>
+        <a href="https://huggingface.co/datasets/gw0/jobfit-jevbench"><img src="https://img.shields.io/badge/%F0%9F%A4%97%20HF-dataset-orange" alt="HF Dataset" /></a>
+        <a href="https://huggingface.co/gw0/jobfit-model"><img src="https://img.shields.io/badge/%F0%9F%A4%97%20HF-model-yellow" alt="HF Model" /></a>
+        <a href="https://huggingface.co/spaces/gw0/jobfit-app"><img src="https://img.shields.io/badge/%F0%9F%A4%97%20HF-space-blue" alt="HF Space" /></a>
+        <a href="https://github.com/sponsors/gw0"><img src="https://img.shields.io/badge/sponsor-%E2%9D%A4-red?logo=github-sponsors" alt="Sponsor" /></a>
+      </p>
+      <p class="mb-3">A CV/job-post fit-scoring typed-decision model, training pipeline, and web app -- <a href="https://github.com/gw0/jobfit-model">JobFit</a>.</p>
+      <p class="mb-5">Paste a CV and job description for calibrated fit scores -- scoring runs entirely in your browser.</p>
 
       <div class="box">
         <div class="field">
